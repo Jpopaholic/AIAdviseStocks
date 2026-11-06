@@ -287,7 +287,7 @@ def call_user_llm(
     )
 
     last_error: Optional[Exception] = None
-    delay = 2.0
+    delay = 4.5
 
     for attempt in range(1, max_retries + 1):
         current_key = raw_keys[(attempt - 1) % len(raw_keys)]

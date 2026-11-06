@@ -713,19 +713,19 @@
         </div>
 
         <div class="form-group">
-          <label for="apiKeyInput">LLM API Key (支援 Google Gemini `AIza...` 或 OpenAI `sk-...`)</label>
+          <label for="apiKeyInput">LLM API Key (支援 Gemini `AIza...` 或 OpenAI `sk-...`，可用逗號 `,` 分隔多把 Key 自動輪詢防限流)</label>
           <div class="input-with-btn">
-            <input type="password" id="apiKeyInput" placeholder="請貼上您的 Gemini API Key 或 OpenAI API Key..." autocomplete="off" />
+            <input type="password" id="apiKeyInput" placeholder="請貼上您的 Gemini API Key 或 OpenAI API Key (支援多組以逗號分隔)..." autocomplete="off" />
             <button class="btn btn-secondary" type="button" onclick="toggleApiKeyVisibility()" id="btnToggleKey" style="white-space: nowrap;">顯示</button>
             <button class="btn btn-danger" type="button" onclick="clearApiKey()" id="btnClearKey" style="white-space: nowrap;" title="立即清除輸入框與瀏覽器 LocalStorage 中的 API Key">🗑️ 清除金鑰</button>
           </div>
         </div>
 
-        <div class="form-row">
+        <div class="form-row" style="grid-template-columns: 1fr 1.2fr 1.2fr;">
           <div class="form-group">
             <label for="providerSelect">AI 供應商 (Provider)</label>
             <select id="providerSelect" onchange="onProviderChange()">
-              <option value="auto">自動偵測 (依 Key 字首判斷)</option>
+              <option value="auto">自動偵測 (依 Key 字首)</option>
               <option value="gemini">Google Gemini</option>
               <option value="openai">OpenAI</option>
             </select>
@@ -735,11 +735,21 @@
             <input
               type="text"
               id="modelSelect"
-              placeholder="手動輸入模型名稱，例如 gemini-2.5-flash、gemini-2.5-pro 或 gpt-4o"
+              placeholder="如 gemini-2.5-flash 或 gpt-4o"
               value="gemini-2.5-flash"
               autocomplete="off"
               spellcheck="false"
             />
+          </div>
+          <div class="form-group">
+            <label for="rpmDelaySelect">呼叫間隔冷卻 (防撞 RPM 限制)</label>
+            <select id="rpmDelaySelect">
+              <option value="4500" selected>4.5 秒 (推薦・免費版 ~13 RPM)</option>
+              <option value="6500">6.5 秒 (保守・免費版 ≤9 RPM)</option>
+              <option value="12500">12.5 秒 (Pro 免費版 ≤5 RPM)</option>
+              <option value="2000">2.0 秒 (付費版 / 多 Key 輪詢)</option>
+              <option value="0">0 秒 (無冷卻全速呼叫)</option>
+            </select>
           </div>
         </div>
       </section>
@@ -971,6 +981,7 @@
     const LS_MODEL = "ai_advise_stocks_model";
     const LS_BOARD = "ai_advise_stocks_board";
     const LS_TARGET_DATE = "ai_advise_stocks_target_date";
+    const LS_RPM_DELAY = "ai_advise_stocks_rpm_delay";
 
     let currentBoardKey = "core_top20";
     let isClientRunning = false;
@@ -1008,11 +1019,13 @@
       const savedModel = localStorage.getItem(LS_MODEL) || "gemini-2.5-flash";
       const savedBoard = localStorage.getItem(LS_BOARD) || "core_top20";
       const savedDate = localStorage.getItem(LS_TARGET_DATE) || getTodayTwDateStr();
+      const savedRpmDelay = localStorage.getItem(LS_RPM_DELAY) ?? "4500";
 
       document.getElementById("apiKeyInput").value = savedKey;
       document.getElementById("providerSelect").value = savedProvider;
       document.getElementById("modelSelect").value = savedModel;
       document.getElementById("targetDateInput").value = savedDate;
+      document.getElementById("rpmDelaySelect").value = savedRpmDelay;
 
       document.getElementById("apiKeyInput").addEventListener("input", (e) => {
         localStorage.setItem(LS_API_KEY, e.target.value.trim());
@@ -1022,6 +1035,9 @@
       });
       document.getElementById("modelSelect").addEventListener("input", (e) => {
         localStorage.setItem(LS_MODEL, e.target.value.trim());
+      });
+      document.getElementById("rpmDelaySelect").addEventListener("change", (e) => {
+        localStorage.setItem(LS_RPM_DELAY, e.target.value);
       });
 
       selectBoard(savedBoard);
@@ -1188,6 +1204,21 @@
       }
     }
 
+    async function waitCooldownMs(durationMs, curStep, totalSteps, labelPrefix) {
+      if (durationMs <= 0 || clientStopRequested) return;
+      const endTime = Date.now() + durationMs;
+      while (Date.now() < endTime && !clientStopRequested) {
+        const remainSec = Math.max(0, (endTime - Date.now()) / 1000);
+        updateProgressBar(
+          curStep,
+          totalSteps,
+          `${labelPrefix}｜⏳ 防撞 RPM 速率冷卻中 (${remainSec.toFixed(1)}s)...`,
+          "running"
+        );
+        await new Promise((r) => setTimeout(r, 250));
+      }
+    }
+
     async function startTwoLayerAnalysis() {
       if (isClientRunning) return;
 
@@ -1196,6 +1227,7 @@
       const modelName = document.getElementById("modelSelect").value.trim();
       const topN = parseInt(document.getElementById("topNSelect").value || "20", 10);
       const requestedDate = document.getElementById("targetDateInput").value || getTodayTwDateStr();
+      const baseDelayMs = parseInt(document.getElementById("rpmDelaySelect").value || "4500", 10);
 
       const errBox = document.getElementById("errorAlertBox");
       errBox.style.display = "none";
@@ -1207,11 +1239,16 @@
         return;
       }
 
+      const rawKeys = apiKey.split(",").map((k) => k.trim()).filter(Boolean);
+      const numKeys = Math.max(1, rawKeys.length);
+      const effectiveIntervalMs = baseDelayMs > 0 ? Math.max(1000, Math.round(baseDelayMs / numKeys)) : 0;
+
       localStorage.setItem(LS_API_KEY, apiKey);
       if (modelName) {
         localStorage.setItem(LS_MODEL, modelName);
       }
       localStorage.setItem(LS_TARGET_DATE, requestedDate);
+      localStorage.setItem(LS_RPM_DELAY, String(baseDelayMs));
 
       isClientRunning = true;
       clientStopRequested = false;
@@ -1233,8 +1270,11 @@
       try {
         // Step 1: Layer 1 Market Regime Assessment + Trading Date Resolution + Candidate Selection
         updateProgressBar(0, topN + 1, `第一層：正在檢查開盤日 (${requestedDate}) 並進行 TAIEX 大盤氣候診斷...`, "running");
-        appendClientLog(`啟動兩層式分析任務｜選擇日期：${requestedDate}｜模型：${modelName}`);
+        appendClientLog(
+          `啟動兩層式分析任務｜選擇日期：${requestedDate}｜模型：${modelName}｜RPM 保護間隔：${(effectiveIntervalMs / 1000).toFixed(1)}s (${numKeys} 把 Key)`
+        );
 
+        let lastCallStartedAt = Date.now();
         const step1Res = await fetch("/api/step/layer1", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1275,7 +1315,7 @@
         const totalSteps = candidates.length + 1;
         updateProgressBar(1, totalSteps, `第一層完成！準備對【${boardLabel}】(${effectiveDate}) 共 ${candidates.length} 檔個股進行五維度評分...`, "running");
 
-        // Step 2: Layer 2 Analyst Stock Scoring (Stock by Stock)
+        // Step 2: Layer 2 Analyst Stock Scoring (Stock by Stock with Smart RPM Pacing & 429 Auto-Retry)
         const completedScores = [];
 
         for (let i = 0; i < candidates.length; i++) {
@@ -1288,43 +1328,100 @@
           const code = cand.stock_code;
           const name = cand.stock_name || code;
 
-          updateProgressBar(
-            i + 1,
-            totalSteps,
-            `第二層：正在評分 (${i + 1}/${candidates.length}) ${code} ${name} (基準日 ${effectiveDate})...`,
-            "running"
-          );
-          appendClientLog(`第二層個股分析 (${i + 1}/${candidates.length})：正在評估 ${code} (${name}) 截至 ${effectiveDate} 之五維度技術指標...`);
-
-          const step2Res = await fetch("/api/step/layer2-stock", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              api_key: apiKey,
-              provider: resolvedProvider,
-              model_name: resolvedModel,
-              stock_code: code,
-              target_date: effectiveDate,
-              candidate_meta: cand,
-              regime_assessment: regimeAssessment
-            })
-          });
-          const step2Data = await step2Res.json();
-          if (!step2Res.ok) {
-            if (step2Res.status === 401) {
-              throw new Error(step2Data.detail || "API Key 驗證或額度錯誤");
+          // 智慧計算距離上一次 LLM 請求啟動經過的時間，補足剩餘冷卻秒數以避開 Gemini RPM 限制
+          if (effectiveIntervalMs > 0) {
+            const elapsedMs = Date.now() - lastCallStartedAt;
+            const remainWaitMs = Math.max(900, effectiveIntervalMs - elapsedMs);
+            if (remainWaitMs > 0) {
+              await waitCooldownMs(
+                remainWaitMs,
+                i + 1,
+                totalSteps,
+                `準備評估 (${i + 1}/${candidates.length}) ${code} ${name}`
+              );
             }
+          }
+
+          if (clientStopRequested) {
+            appendClientLog(`偵測到停止執行旗標 (Stop Flag)，於第 ${i + 1} 檔前安全終止。`, "WARNING");
+            break;
+          }
+
+          // 若使用者提供多組逗號分隔 Key，按順序輪詢分攤各檔股票請求
+          const rotatedKey = rawKeys[(i + 1) % rawKeys.length];
+
+          let step2SuccessData = null;
+          const maxStockRetries = 3;
+
+          for (let retryIdx = 0; retryIdx <= maxStockRetries; retryIdx++) {
+            if (clientStopRequested) break;
+
+            updateProgressBar(
+              i + 1,
+              totalSteps,
+              `第二層：正在評分 (${i + 1}/${candidates.length}) ${code} ${name} (基準日 ${effectiveDate})${retryIdx > 0 ? ` [重試 #${retryIdx}]` : ""}...`,
+              "running"
+            );
+            if (retryIdx === 0) {
+              appendClientLog(`第二層個股分析 (${i + 1}/${candidates.length})：正在評估 ${code} (${name}) 截至 ${effectiveDate} 之五維度技術指標...`);
+            }
+
+            lastCallStartedAt = Date.now();
+            const step2Res = await fetch("/api/step/layer2-stock", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                api_key: rotatedKey,
+                provider: resolvedProvider,
+                model_name: resolvedModel,
+                stock_code: code,
+                target_date: effectiveDate,
+                candidate_meta: cand,
+                regime_assessment: regimeAssessment
+              })
+            });
+            const step2Data = await step2Res.json();
+
+            if (step2Res.ok) {
+              step2SuccessData = step2Data;
+              break;
+            }
+
+            if (step2Res.status === 401) {
+              throw new Error(step2Data.detail || "API Key 無效或無權限，請檢查您輸入的金鑰");
+            }
+
+            // 撞到 HTTP 429 RPM 速率限制時，自動進入倒數冷卻並重試同一檔股票，絕不直接中斷或跳過
+            if (step2Res.status === 429 && retryIdx < maxStockRetries) {
+              const backoffSec = 15 + retryIdx * 10;
+              appendClientLog(
+                `⚠️ 評估 ${code} (${name}) 觸發 Gemini/LLM RPM 速率限制 (HTTP 429)，自動冷卻 ${backoffSec} 秒後進行第 ${retryIdx + 1}/${maxStockRetries} 次重試...`,
+                "WARNING"
+              );
+              await waitCooldownMs(
+                backoffSec * 1000,
+                i + 1,
+                totalSteps,
+                `⚠️ 觸發 RPM 限制，正在等待額度恢復後重試 ${code} ${name}`
+              );
+              continue;
+            }
+
             appendClientLog(`評估 ${code} 發生異常：${step2Data.detail || "未知錯誤"}，略過該檔。`, "WARNING");
+            break;
+          }
+
+          if (!step2SuccessData) {
             continue;
           }
 
-          addUsage(step2Data.usage);
-          if (step2Data.score) {
-            completedScores.push(step2Data.score);
+          addUsage(step2SuccessData.usage);
+          if (step2SuccessData.score) {
+            completedScores.push(step2SuccessData.score);
             completedScores.sort((a, b) => (b.total_score - a.total_score) || (b.confidence - a.confidence));
             completedScores.forEach((item, idx) => { item.rank = idx + 1; });
             renderLayer2ScoresTable(completedScores, boardLabel);
-            appendClientLog(`✔ ${code} (${name}) 評分完成：總分 ${step2Data.score.total_score} / 100 分`);
+            appendClientLog(`✔ ${code} (${name}) 評分完成：總分 ${step2SuccessData.score.total_score} / 100 分`);
           }
         }
 

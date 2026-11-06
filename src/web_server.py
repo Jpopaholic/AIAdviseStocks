@@ -660,8 +660,10 @@ async def api_step_layer1(req: AnalyzeStartRequest) -> Dict[str, Any]:
             "usage": usage_tracker,
             "timestamp": _now_tw_str(),
         }
-    except (LLMAuthenticationError, LLMRateLimitError) as llm_err:
-        raise HTTPException(status_code=401, detail=str(llm_err))
+    except LLMAuthenticationError as auth_err:
+        raise HTTPException(status_code=401, detail=str(auth_err))
+    except LLMRateLimitError as rate_err:
+        raise HTTPException(status_code=429, detail=str(rate_err))
     except Exception as e:
         logger.error(f"[Step Layer1] 執行失敗: {e}")
         raise HTTPException(status_code=500, detail=f"第一層大盤診斷或選股失敗: {str(e)}")
@@ -729,8 +731,10 @@ async def api_step_layer2_stock(req: StepLayer2StockRequest) -> Dict[str, Any]:
             "usage": usage_tracker,
             "timestamp": _now_tw_str(),
         }
-    except (LLMAuthenticationError, LLMRateLimitError) as llm_err:
-        raise HTTPException(status_code=401, detail=str(llm_err))
+    except LLMAuthenticationError as auth_err:
+        raise HTTPException(status_code=401, detail=str(auth_err))
+    except LLMRateLimitError as rate_err:
+        raise HTTPException(status_code=429, detail=str(rate_err))
     except HTTPException:
         raise
     except Exception as e:
