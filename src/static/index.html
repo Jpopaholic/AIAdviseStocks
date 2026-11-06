@@ -666,7 +666,8 @@
           <label for="apiKeyInput">LLM API Key (支援 Google Gemini `AIza...` 或 OpenAI `sk-...`)</label>
           <div class="input-with-btn">
             <input type="password" id="apiKeyInput" placeholder="請貼上您的 Gemini API Key 或 OpenAI API Key..." autocomplete="off" />
-            <button class="btn btn-secondary" type="button" onclick="toggleApiKeyVisibility()" id="btnToggleKey">顯示</button>
+            <button class="btn btn-secondary" type="button" onclick="toggleApiKeyVisibility()" id="btnToggleKey" style="white-space: nowrap;">顯示</button>
+            <button class="btn btn-danger" type="button" onclick="clearApiKey()" id="btnClearKey" style="white-space: nowrap;" title="立即清除輸入框與瀏覽器 LocalStorage 中的 API Key">🗑️ 清除金鑰</button>
           </div>
         </div>
 
@@ -1050,6 +1051,16 @@
         input.type = "password";
         btn.textContent = "顯示";
       }
+    }
+
+    function clearApiKey() {
+      const input = document.getElementById("apiKeyInput");
+      const btn = document.getElementById("btnToggleKey");
+      input.value = "";
+      input.type = "password";
+      if (btn) btn.textContent = "顯示";
+      localStorage.removeItem(LS_API_KEY);
+      appendClientLog("🔒 已清除輸入框與瀏覽器 LocalStorage 中的 LLM API Key。", "INFO");
     }
 
     function onProviderChange() {
