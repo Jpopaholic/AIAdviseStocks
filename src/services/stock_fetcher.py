@@ -65,7 +65,7 @@ def _parse_number(raw: Any, default: float = 0.0) -> float:
 
 
 def _validate_kline_row(row: Dict[str, Any]) -> bool:
-    """校驗單筆 K 線資料完整性，過濾空值、無成交量之未結算列或異常價格。"""
+    """校驗單筆 K 線資料完整性，過濾空值或異常價格。"""
     o = safe_float(row.get("open"), -1.0)
     h = safe_float(row.get("high"), -1.0)
     l = safe_float(row.get("low"), -1.0)
@@ -76,16 +76,13 @@ def _validate_kline_row(row: Dict[str, Any]) -> bool:
         return False
     if not row.get("date"):
         return False
-    # 個股（非大盤指數 TAIEX）若無成交量或成交金額，代表當日無有效交易或資料尚未結算，不納入 K 線
-    if str(row.get("stockCode", "")).upper() != "TAIEX":
-        if safe_float(row.get("volume"), 0.0) <= 0:
-            return False
     return True
 
 
 def _fetch_yahoo_chart_klines(symbol: str, stock_code: str, range_str: str = "1y") -> List[Dict[str, Any]]:
     """
     透過 Yahoo Finance v8 Chart API 快速擷取近一年日 K 線數據 (單次請求即可獲得約 245 根日 K)。
+    同時讀取 meta.regularMarketTime 補齊跨日 (00:00 UTC+8) 結算空窗期的最新交易日 K 線。
     """
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range={range_str}&interval=1d"
     resp = requests.get(url, headers=HEADERS, timeout=8)
@@ -97,6 +94,7 @@ def _fetch_yahoo_chart_klines(symbol: str, stock_code: str, range_str: str = "1y
         return []
 
     res = result_list[0]
+    meta = res.get("meta") or {}
     timestamps = res.get("timestamp") or []
     quote_list = res.get("indicators", {}).get("quote") or []
     if not timestamps or not quote_list:
@@ -142,6 +140,30 @@ def _fetch_yahoo_chart_klines(symbol: str, stock_code: str, range_str: str = "1y
         }
         if _validate_kline_row(item):
             klines_by_date[dt_str] = item
+
+    # 補齊 Yahoo Finance 在台灣時間午夜 00:00 跨日後，timestamp 尚未寫入前一日收盤但 meta.regularMarketTime 已有的最新交易日
+    reg_time = safe_int(meta.get("regularMarketTime"), 0)
+    reg_price = safe_float(meta.get("regularMarketPrice"), 0.0)
+    if reg_time > 0 and reg_price > 0:
+        reg_dt_str = datetime.fromtimestamp(reg_time, tz=timezone.utc).astimezone(tw_tz).strftime("%Y-%m-%d")
+        if reg_dt_str not in klines_by_date:
+            prev_c = safe_float(meta.get("chartPreviousClose") or meta.get("previousClose"), reg_price)
+            o_m = safe_float(meta.get("regularMarketOpen"), prev_c if prev_c > 0 else reg_price)
+            h_m = max(safe_float(meta.get("regularMarketDayHigh"), reg_price), o_m, reg_price)
+            l_m = min(safe_float(meta.get("regularMarketDayLow") or reg_price, reg_price), o_m, reg_price)
+            v_m = safe_int(meta.get("regularMarketVolume"), 0)
+            meta_item = {
+                "stockCode": stock_code,
+                "date": reg_dt_str,
+                "open": round(o_m, 2),
+                "high": round(h_m, 2),
+                "low": round(l_m, 2),
+                "close": round(reg_price, 2),
+                "volume": v_m,
+                "turnover": round(float(reg_price * v_m), 0),
+            }
+            if _validate_kline_row(meta_item):
+                klines_by_date[reg_dt_str] = meta_item
 
     sorted_klines = sorted(klines_by_date.values(), key=lambda x: x["date"])
     return sorted_klines
@@ -338,19 +360,22 @@ def fetch_taiex_klines(
     except Exception as e:
         logger.debug(f"Yahoo Finance 擷取 TAIEX 失敗，將嘗試證交所 API: {e}")
 
-    # 2. 若失敗，嘗試自證交所補齊最近三個月
-    if not klines:
-        try:
-            tw_now = get_taiwan_datetime()
-            merged: Dict[str, Dict[str, Any]] = {}
-            for m_offset in range(4):
-                dt = tw_now - timedelta(days=28 * m_offset)
-                m_klines = _fetch_twse_taiex_month(dt.strftime("%Y%m01"))
-                for item in m_klines:
-                    merged[item["date"]] = item
-            klines = sorted(merged.values(), key=lambda x: x["date"])
-        except Exception as e:
-            logger.warning(f"證交所擷取 TAIEX 歷史 K 線失敗: {e}")
+    # 2. 補充合併證交所當月 MI_5MINS_HIST 最新交易日（防止 Yahoo 在午夜 00:00 跨日結算空窗期漏掉剛收盤之交易日）
+    try:
+        tw_now = get_taiwan_datetime()
+        by_date: Dict[str, Dict[str, Any]] = {item["date"]: item for item in klines if item.get("date")}
+        months_to_fetch = 1 if by_date else 4
+        for m_offset in range(months_to_fetch):
+            dt = tw_now - timedelta(days=28 * m_offset)
+            m_klines = _fetch_twse_taiex_month(dt.strftime("%Y%m01"))
+            for item in m_klines:
+                d_key = item.get("date")
+                if d_key and d_key not in by_date:
+                    by_date[d_key] = item
+        if by_date:
+            klines = sorted(by_date.values(), key=lambda x: x["date"])
+    except Exception as e:
+        logger.debug(f"證交所補充擷取 TAIEX 歷史 K 線略過: {e}")
 
     # 3. 離線或封鎖環境備援
     if not klines:
@@ -377,6 +402,11 @@ def resolve_nearest_trading_date(
     # 取得大盤完整歷史交易日清單
     taiex_all = fetch_taiex_klines(days=250, force_refresh=force_refresh, end_date=None)
     available_dates = sorted({str(k.get("date", "")).strip() for k in taiex_all if k.get("date")})
+
+    # 若快取中剛好缺少所選日期（例如跨午夜 00:00 後首次查詢），強制重刷一次確認最新交易日
+    if requested_date not in available_dates and not force_refresh:
+        taiex_all = fetch_taiex_klines(days=250, force_refresh=True, end_date=None)
+        available_dates = sorted({str(k.get("date", "")).strip() for k in taiex_all if k.get("date")})
 
     if not available_dates:
         return {
