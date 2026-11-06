@@ -1007,11 +1007,23 @@
     };
 
     const POSTURE_LABELS = {
-      STRONG_ATTACK: "⚔️ 強攻攻勢 (STRONG_ATTACK)",
-      MODERATE_ATTACK: "🎯 穩健進攻 (MODERATE_ATTACK)",
-      CHOPPY_TACTICAL: "🔄 震盪靈活 (CHOPPY_TACTICAL)",
-      DEFENSIVE_ACCUMULATION: "🛡️ 防禦承接 (DEFENSIVE_ACCUMULATION)",
-      STRICT_DEFENSE: "🔒 極度保守 (STRICT_DEFENSE)"
+      STRONG_ATTACK: "⚔️ 強勢擴張期 (STRONG_ATTACK)",
+      MODERATE_ATTACK: "🎯 溫和偏多期 (MODERATE_ATTACK)",
+      CHOPPY_TACTICAL: "🔄 區間整理期 (CHOPPY_TACTICAL)",
+      DEFENSIVE_ACCUMULATION: "🛡️ 修正收斂期 (DEFENSIVE_ACCUMULATION)",
+      STRICT_DEFENSE: "🔒 極度保守期 (STRICT_DEFENSE)"
+    };
+
+    const STYLE_LABELS = {
+      BREAKOUT: "突破型態 (BREAKOUT)",
+      PULLBACK: "拉回支撐型 (PULLBACK)",
+      MOMENTUM: "強勢動能型 (MOMENTUM)",
+      SUPPORT_REBOUND: "支撐反彈型 (SUPPORT_REBOUND)",
+      RANGE_LOW: "區間下緣型 (RANGE_LOW)",
+      DEFENSIVE_VALUE: "低波防禦型 (DEFENSIVE_VALUE)",
+      MICRO_POSITION: "極低乖離型 (MICRO_POSITION)",
+      HIGH_SAFETY_ONLY: "高支撐安全型 (HIGH_SAFETY_ONLY)",
+      NONE: "無明顯支撐型態 (NONE)"
     };
 
     function getTodayTwDateStr() {
@@ -1509,8 +1521,12 @@
         reg.target_cash_ratio !== undefined ? `${Math.round(Number(reg.target_cash_ratio) * 100)}%` : "--";
       document.getElementById("regRiskMult").textContent =
         reg.risk_multiplier !== undefined ? Number(reg.risk_multiplier).toFixed(2) : "--";
+      let rawStyles = Array.isArray(reg.allowed_buy_styles) ? reg.allowed_buy_styles.filter(Boolean) : [];
+      if (rawStyles.length > 1 && rawStyles.includes("NONE")) {
+        rawStyles = rawStyles.filter((s) => s !== "NONE");
+      }
       document.getElementById("regAllowedStyles").textContent =
-        Array.isArray(reg.allowed_buy_styles) ? reg.allowed_buy_styles.join(", ") : "--";
+        rawStyles.length > 0 ? rawStyles.map((s) => STYLE_LABELS[s] || s).join("、") : "--";
       document.getElementById("regDirectiveText").textContent = reg.tactical_directive || "--";
       document.getElementById("regReasonText").textContent = reg.reason || "--";
     }

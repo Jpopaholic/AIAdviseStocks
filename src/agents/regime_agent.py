@@ -147,7 +147,7 @@ def generate_market_regime(
         "5. STRICT_DEFENSE (高波動收縮期)：\n"
         "   - 適用氣候：PANIC_BEAR\n"
         "   - risk_multiplier = 0.15 ~ 0.25，target_cash_ratio = 0.75 ~ 0.90\n"
-        "   - allowed_buy_styles = ['HIGH_SAFETY_ONLY', 'NONE']\n"
+        "   - allowed_buy_styles = ['HIGH_SAFETY_ONLY'] (僅限高安全分抗跌型態；若全面重挫無支撐則單獨填 ['NONE']，切勿將 'HIGH_SAFETY_ONLY' 與 'NONE' 同時並陳)\n"
         "   - 結構特徵：大盤均線呈空頭排列且波動率劇烈放大，下檔支撐面臨全面測試。\n\n"
         "【台灣金融法規免責防線（極重要，違反即觸法）】：\n"
         "- 本系統僅提供純客觀的歷史技術指標數據整理與量化統計參數，嚴禁提供任何具體投資建議或交易指導。\n"
@@ -190,8 +190,15 @@ def generate_market_regime(
         res = json.loads(raw_response)
         res["risk_multiplier"] = safe_float(res.get("risk_multiplier"), default=0.7, min_val=0.15, max_val=1.0)
         res["target_cash_ratio"] = safe_float(res.get("target_cash_ratio"), default=0.35, min_val=0.05, max_val=0.90)
-        if not isinstance(res.get("allowed_buy_styles"), list):
+        raw_styles = res.get("allowed_buy_styles")
+        if not isinstance(raw_styles, list) or not raw_styles:
             res["allowed_buy_styles"] = ["PULLBACK"]
+        else:
+            cleaned_styles = [str(s).strip().upper() for s in raw_styles if str(s).strip()]
+            # 若清單中已有具體型態（如 HIGH_SAFETY_ONLY），自動移除矛盾的 NONE
+            if len(cleaned_styles) > 1 and "NONE" in cleaned_styles:
+                cleaned_styles = [s for s in cleaned_styles if s != "NONE"]
+            res["allowed_buy_styles"] = cleaned_styles or ["NONE"]
         res["tactical_directive"] = sanitize_compliance_text(res.get("tactical_directive") or "")
         if not res["tactical_directive"]:
             res["tactical_directive"] = (
