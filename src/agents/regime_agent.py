@@ -4,7 +4,7 @@ import logging
 from typing import List, Dict, Any, Optional, Callable
 from pydantic import BaseModel, Field
 
-from src.config import config, safe_float
+from src.config import config, safe_float, sanitize_compliance_text
 from src.services.technical_indicators import compute_all_indicators
 from src.services.llm_client import call_user_llm, LLMAuthenticationError, LLMRateLimitError
 
@@ -35,11 +35,11 @@ class MarketRegimeAssessment(BaseModel):
     )
     tactical_directive: str = Field(
         ...,
-        description="針對當前大盤氣候給予投資人的具體動態姿態操作與風控特別指引 (繁體中文)，說明應採取的控部位、停利停損與策略選股重點。"
+        description="針對當前大盤氣候之客觀技術結構與波動風險特徵摘要 (繁體中文)。【法規硬性防線】：嚴禁出現「建議、宜、買進、賣出、停損、停利、觀望、加碼、減碼、進出場、追高、抄底、操作」等具體投資建議或交易指導字眼，僅能客觀描述大盤均線、量能與波動結構特徵。"
     )
     reason: str = Field(
         ...,
-        description="判斷當前市場狀態的詳細理由與宏觀分析依據 (繁體中文)，請分析短期均線、價格趨勢與成交量變化。"
+        description="判斷當前市場狀態的純客觀數據與宏觀技術分析依據 (繁體中文)，請分析短期均線、價格趨勢與成交量變化，嚴禁包含任何主觀買賣、停損、停利或觀望建議。"
     )
 
 
@@ -123,33 +123,37 @@ def generate_market_regime(
         "- 'VOLATILE_RANGE': 高波動震盪。單日上下波幅劇烈，多空洗盤，方向不明。\n"
         "- 'CORRECTION_BEAR': 震盪修正/初跌段。跌破月線 MA20，高點逐漸降低，但季線 MA60 仍具緩衝力道或尚未出現全面恐慌潰敗。\n"
         "- 'PANIC_BEAR': 恐慌空頭/主跌段。均線空頭排列，收盤價跌破 MA60 季線，長黑帶量下探。\n\n"
-        "【五階交易姿態 (posture) 與對應姿態操作指引】：\n"
-        "1. STRONG_ATTACK (強攻攻勢)：\n"
+        "【五階市場風險佇列 (posture) 與對應量化結構特徵】：\n"
+        "1. STRONG_ATTACK (強勢擴張期)：\n"
         "   - 適用氣候：STRONG_BULL\n"
         "   - risk_multiplier = 0.85 ~ 1.00，target_cash_ratio = 0.05 ~ 0.15\n"
         "   - allowed_buy_styles = ['BREAKOUT', 'PULLBACK', 'MOMENTUM']\n"
-        "   - 指令重點：積極布局主攻族群，允許追高與突破買進，保持低現金比例擴大獲利。\n\n"
-        "2. MODERATE_ATTACK (穩健進攻)：\n"
+        "   - 結構特徵：大盤呈現多頭排列與量增突破型態，強勢動能指標佔比高。\n\n"
+        "2. MODERATE_ATTACK (溫和偏多期)：\n"
         "   - 適用氣候：REBOUND_BULL\n"
         "   - risk_multiplier = 0.70 ~ 0.85，target_cash_ratio = 0.15 ~ 0.30\n"
         "   - allowed_buy_styles = ['PULLBACK', 'SUPPORT_REBOUND']\n"
-        "   - 指令重點：偏好逢拉回打底買進，不盲目追高，維繫中等部位。\n\n"
-        "3. CHOPPY_TACTICAL (震盪靈活)：\n"
+        "   - 結構特徵：指數維持月線支撐上方，以回測支撐與均線靠攏型態為主。\n\n"
+        "3. CHOPPY_TACTICAL (區間整理期)：\n"
         "   - 適用氣候：CALM_RANGE, VOLATILE_RANGE\n"
         "   - risk_multiplier = 0.50 ~ 0.65，target_cash_ratio = 0.30 ~ 0.50\n"
         "   - allowed_buy_styles = ['RANGE_LOW', 'DEFENSIVE_VALUE']\n"
-        "   - 指令重點：區間操作、快進快出，嚴格執行停利與停損，維持三成以上現金靈活調度。\n\n"
-        "4. DEFENSIVE_ACCUMULATION (防禦承接)：\n"
+        "   - 結構特徵：指數處於箱型區間震盪，上下檔支撐與壓力界線明顯，輪動速度快。\n\n"
+        "4. DEFENSIVE_ACCUMULATION (修正收斂期)：\n"
         "   - 適用氣候：CORRECTION_BEAR, 高波動劇烈洗盤\n"
         "   - risk_multiplier = 0.25 ~ 0.45，target_cash_ratio = 0.50 ~ 0.75\n"
         "   - allowed_buy_styles = ['DEFENSIVE_VALUE', 'MICRO_POSITION']\n"
-        "   - 指令重點：大盤修正但非暴跌，保留五成以上現金。僅建議對技術總分與安全分極優個股進行少量關注。\n\n"
-        "5. STRICT_DEFENSE (極度保守)：\n"
+        "   - 結構特徵：大盤處於短中期均線修正階段，低乖離與高支撐安全分特徵較具韌性。\n\n"
+        "5. STRICT_DEFENSE (高波動收縮期)：\n"
         "   - 適用氣候：PANIC_BEAR\n"
         "   - risk_multiplier = 0.15 ~ 0.25，target_cash_ratio = 0.75 ~ 0.90\n"
         "   - allowed_buy_styles = ['HIGH_SAFETY_ONLY', 'NONE']\n"
-        "   - 指令重點：現金為王，暫停常規開倉，優先減碼弱勢部位，保留七成五以上最高現金水位。\n\n"
-        "你的輸出必須完全符合所規定之 JSON Schema，分析理由與戰術特別指令請一律使用「繁體中文」。"
+        "   - 結構特徵：大盤均線呈空頭排列且波動率劇烈放大，下檔支撐面臨全面測試。\n\n"
+        "【台灣金融法規免責防線（極重要，違反即觸法）】：\n"
+        "- 本系統僅提供純客觀的歷史技術指標數據整理與量化統計參數，嚴禁提供任何具體投資建議或交易指導。\n"
+        "- 在 `tactical_directive` 與 `reason` 中，【嚴禁出現】以下任何字眼：「建議」、「宜」、「觀望」、「停損」、「止損」、「停利」、「買進」、「賣出」、「加碼」、「減碼」、「進場」、「出場」、「開倉」、「追高」、「抄底」、「承接」、「布局」、「操作」、「控管風險」、「現金為王」、「投資人」。\n"
+        "- 請一律以純客觀的「市場技術結構與指標數據狀態陳述」撰寫。\n"
+        "你的輸出必須完全符合所規定之 JSON Schema，並一律使用「繁體中文」。"
     )
 
     user_prompt = (
@@ -188,12 +192,14 @@ def generate_market_regime(
         res["target_cash_ratio"] = safe_float(res.get("target_cash_ratio"), default=0.35, min_val=0.05, max_val=0.90)
         if not isinstance(res.get("allowed_buy_styles"), list):
             res["allowed_buy_styles"] = ["PULLBACK"]
-        if not res.get("tactical_directive"):
+        res["tactical_directive"] = sanitize_compliance_text(res.get("tactical_directive") or "")
+        if not res["tactical_directive"]:
             res["tactical_directive"] = (
-                f"當前處於 {res.get('posture', 'CHOPPY_TACTICAL')} 姿態，"
-                f"建議風險限額乘數 {res['risk_multiplier']:.2f} 並保持相應現金比率。"
+                f"當前大盤處於 {res.get('posture', 'CHOPPY_TACTICAL')} 結構，"
+                f"量化風險係數為 {res['risk_multiplier']:.2f}，統計保守權重為 {res['target_cash_ratio'] * 100:.0f}%。"
             )
-        if not res.get("reason"):
+        res["reason"] = sanitize_compliance_text(res.get("reason") or "")
+        if not res["reason"]:
             res["reason"] = res["tactical_directive"]
 
         latest_k = recent_taiex[-1]

@@ -5,7 +5,7 @@ import logging
 from typing import List, Dict, Any, Optional, Callable
 from pydantic import BaseModel, Field
 
-from src.config import config, safe_int, safe_float, get_stock_name
+from src.config import config, safe_int, safe_float, get_stock_name, sanitize_compliance_text
 from src.services.technical_indicators import compute_all_indicators
 from src.services.llm_client import (
     call_user_llm,
@@ -51,7 +51,7 @@ class AnalystStockScore(BaseModel):
     )
     reason: str = Field(
         ...,
-        description="該檔股票的簡短技術分析理由與評分依據（使用繁體中文，限定 80 ~ 150 字，禁止超出）。請精簡指出關鍵指標信號，不要贅述每日歷史細節與冗長計算過程。"
+        description="該檔股票的純客觀技術指標數據摘要與評分依據（使用繁體中文，限定 80 ~ 150 字，禁止超出）。【法規硬性防線】：嚴禁出現「建議、宜、觀望、停損、止損、停利、買進、賣出、加碼、減碼、進場、出場、布局、承接、追高、抄底、操作、控管風險、目標價」等任何具體投資建議或操作指導字眼，結尾僅能客觀描述均線、動能、量能或支撐壓力結構狀態。"
     )
 
 
@@ -192,7 +192,11 @@ def generate_analyst_assessments(
         f"你的金融量化分析技能包含：\n{skills_text}\n\n"
         "請嚴格遵守以下指示：\n"
         "1. 你的輸出必須完全符合所規定的 JSON Schema (AnalystStockScore)，不可包含額外文字。\n"
-        "2. 你的分析理由請一律使用「繁體中文」，嚴格限制在 80 到 150 字以內，精簡指出關鍵技術指標信號，請勿贅述每日歷史細節。"
+        "2. 你的分析理由請一律使用「繁體中文」，嚴格限制在 80 到 150 字以內，精簡指出關鍵技術指標信號，請勿贅述每日歷史細節。\n"
+        "3. 【台灣金融法規免責防線（極重要，違反即觸法）】：\n"
+        "   - 本系統僅提供純客觀的歷史技術指標數據整理與量化評分，絕對不可提供任何投資建議或操作指令。\n"
+        "   - 在 `reason` 中，【嚴禁出現】以下任何字眼或語意：「建議」、「宜」、「觀望」、「保持觀望」、「停損」、「止損」、「停利」、「買進」、「買入」、「賣出」、「加碼」、「減碼」、「進場」、「出場」、「布局」、「承接」、「追高」、「抄底」、「持有」、「操作」、「買點」、「賣點」、「目標價」、「控管風險」、「現金為王」、「投資人」。\n"
+        "   - 文章結尾必須是純客觀的「技術面結構與指標狀態總結」（例如：「整體均線與動能指標呈現空方排列特徵，下檔季線為重要支撐觀察位。」或「綜合量價與指標數據，短線維持多頭排列與量能擴增格局。」），切勿給予任何行為指導。"
     )
 
     raw_scores: List[Dict[str, Any]] = []
@@ -261,7 +265,7 @@ def generate_analyst_assessments(
             f"{board_line}\n"
             f"● 股票代號 {code} ({stock_name}) 最近 15 天 K 線數據與技術指標 (最下方為最新一日行情)：\n"
             f"{klines_text}\n\n"
-            "請基於上述 K 線、技術指標與第一層大盤氣候，產出該股票的五維度量化評分與精簡繁體中文分析理由（80~150字）。"
+            "請基於上述 K 線、技術指標與第一層大盤氣候，產出該股票的五維度量化評分與純客觀繁體中文技術指標摘要（80~150字，嚴禁出現『建議、觀望、停損、停利、買進、賣出、進出場、操作、控管風險』等任何投資建議字眼）。"
         )
 
         try:
@@ -360,9 +364,9 @@ def generate_analyst_assessments(
         else:
             vol_tier = "NORMAL"
 
-        reason_text = str(s_item.get("reason") or "").strip()
+        reason_text = sanitize_compliance_text(s_item.get("reason") or "")
         if not reason_text:
-            reason_text = "均線與量價結構呈現中性整理格局，建議觀察後續量能變化與支撐表現。"
+            reason_text = "均線與量價結構呈現中性整理格局，各項技術指標處於區間收斂狀態。"
         elif len(reason_text) > 160:
             reason_text = reason_text[:155].rstrip("，、。") + "。"
 
