@@ -1,0 +1,44 @@
+# Python 編譯與快取檔案
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# 虛擬環境
+.venv/
+venv/
+ENV/
+env/
+
+# 環境變數與敏感設定 (嚴禁上傳任何包含金鑰之檔案)
+.env
+.env.*
+!.env.example
+
+# Vercel 部署快取
+.vercel/
+
+# 測試與覆蓋率報告
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# 日誌與暫存分析報告
+*.log
+logs/
+tmp/
+temp/
+
+# IDE 與編輯器設定
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 作業系統暫存檔
+.DS_Store
+Thumbs.db
+Desktop.ini

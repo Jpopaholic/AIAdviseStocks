@@ -1,0 +1,240 @@
+{
+  "glossary": {
+    "使用者自備金鑰 (User LLM API Key / BYOK)": "由使用者於網頁前端自行輸入並承擔調用費用的 LLM API 金鑰（如 Gemini API Key 或 OpenAI API Key）與模型設定，保存於前端瀏覽器 LocalStorage 並於觸發分析時動態傳遞至後端記憶體執行，伺服器不落地儲存。",
+    "三大自動選股榜單 (Three Auto-Selection Leaderboards)": "系統自動選股的三大分類模式：1. 大盤核心榜（依成交金額排序之 Top 20 指標股）、2. 百元精選榜（股價低於 100 元且成交金額排序 Top 20 之高流動性親民股）、3. 人氣 ETF 榜（固定追蹤 0050、0056、00878、00929、00919、006208 等市值與高股息龍頭 ETF）。",
+    "台股 K 線與技術指標數據 (K-Lines & Technical Indicators)": "從外部公開台股 API 擷取並快取於伺服器記憶體的大盤 (TAIEX) 與個股歷史日 K 線 (OHLCV 與成交金額)，並由程式預先計算附加 MA5/MA20/MA60、VOL_MA5/VOL_MA20、RSI(14)、MACD、DMI 與 ATR(14) 指標之資料結構。",
+    "自動選股篩選結果 (Auto-Selected Stock Candidates)": "依據三大自動選股榜單（大盤核心榜、百元精選榜、人氣 ETF 榜）之成交金額與股價條件自動篩選出，並可結合當日量價技術指標與第一層大盤交易姿態送入第二層深度分析的股票代號列表。",
+    "第一層：大盤氣候診斷報告 (Layer 1 Market Regime Assessment)": "由 AI 宏觀專家針對 TAIEX 近 30 日價量與指標分析產出的結構化 JSON，包含六階市場狀態 (regime)、五階交易姿態 (posture)、建議現金儲備比 (target_cash_ratio)、建議操作型態 (allowed_buy_styles)、戰術特別指令 (tactical_directive) 與宏觀分析理由 (reason)。",
+    "第二層：個股五維度量化評分 (Layer 2 Analyst Stock Score)": "由 AI 量化技術分析師針對自動挑選之個股產出的結構化評分模型，包含趨勢得分 (trend_score 0-20)、動能得分 (momentum_score 0-20)、成交量得分 (volume_score 0-20)、安全防守得分 (safety_score 0-20)、大盤一致性得分 (regime_score 0-20)、程式加總之總分 (total_score 0-100)、信心指數 (confidence 0.0-1.0) 及繁體中文分析理由 (reason)。",
+    "Markdown 分析報告匯出 (Markdown Report Export)": "彙整第一層大盤氣候診斷、三大自動選股榜單標的與第二層個股五維度量化評分排行榜，格式化為結構化 Markdown (.md) 報告，供使用者由網頁直接檢視與下載儲存。",
+    "停止執行旗標 (Stop Flag)": "由網頁端發送的訊號 (stop_requested)，用於通知背景運行中的批次分析在下一個步驟推進前安全終止。"
+  },
+  "globalConstraints": [
+    "系統核心技術棧為 Python 3.10+、FastAPI + Uvicorn (唯一 Web Server 入口)、Pydantic 及 Google GenAI / OpenAI Python SDK。",
+    "無資料庫伺服器與無外部推播架構：系統完全不依賴 Supabase 或任何外部資料庫伺服器，亦不使用 Discord 等外部推播，純粹由 Web 介面呈現分析結果並支援 Markdown (.md) 報告檔案下載。",
+    "嚴格保留 @AIAutoStocks 的「第一層：大盤氣候診斷 (Regime Agent)」與「第二層：個股五維度量化技術分析評分 (Analyst Agent)」，完全扣掉第三層買賣決策 (Decision Agent)、真實/模擬券商下單委託與資金部位交割邏輯。",
+    "採用 BYOK (Bring Your Own Key) 模式：LLM API Key 由使用者在網頁前端自行輸入、費用自行承擔；伺服器端不硬編碼預設 LLM 金鑰，且嚴禁將使用者傳入的 API Key 寫入日誌或磁碟。",
+    "股票分析標的採「三大榜單自動挑選」機制：支援 1. 大盤核心榜（成交金額 Top 20）、2. 百元精選榜（股價 < 100 元 且 成交金額 Top 20）、3. 人氣 ETF 榜（固定追蹤 0050、0056、00878、00929 等市值與高股息龍頭），自動篩選送入第二層分析。",
+    "所有時間戳記與市場開收盤判斷皆採用台灣時區 (UTC+8)，休市期間或盤前自動使用最近一個有效交易日的完整收盤 K 線與成交金額數據進行分析。",
+    "需要完整的中文日誌 (Logging) 支援控制台與記憶體狀態輸出，並採用 pytest 框架編寫單元測試。"
+  ],
+  "nodes": [
+    {
+      "id": "config-manager",
+      "name": "系統配置與環境變數管理器",
+      "produce": "載入系統環境參數、三大自動選股榜單常數、人氣 ETF 固定追蹤清單、台股代號名稱映射表與數值安全轉換工具 (safe_int/safe_float)",
+      "vibeNotes": "參照 AIAutoStocks 的 config.py，定義三大自動選股榜單常數（大盤核心榜、百元精選榜、人氣 ETF 榜固定追蹤 0050/0056/00878/00929 等龍頭）與台股中文名稱映射字典，移除資料庫、券商與 Discord 設定",
+      "dependencies": [],
+      "synthesis": {
+        "filePath": "src/config.py",
+        "status": "completed",
+        "intentSignal": "使用 python-dotenv 載入基礎環境變數，定義三大自動選股榜單配置、人氣 ETF 固定清單、台股中文名稱查詢及防止數值溢位的 safe_int 與 safe_float 函式",
+        "extractedConstraints": [
+          "不得依賴外部資料庫或硬編碼任何 LLM API Key",
+          "必須內建人氣 ETF 榜固定追蹤清單（含 0050、0056、00878、00929 等）與完整的台股中文名稱映射支援"
+        ],
+        "userOverridden": false
+      },
+      "trace": {
+        "stale": false,
+        "lastImplementedPrompt": ""
+      }
+    },
+    {
+      "id": "technical-indicator-engine",
+      "name": "量化技術指標計算引擎",
+      "produce": "對傳入的大盤或個股 K 線序列原地計算並附加 MA5、MA20、MA60、VOL_MA5、VOL_MA20、RSI(14)、MACD、DMI(+DI/-DI/ADX) 與 ATR(14) 指標",
+      "vibeNotes": "直接參照 AIAutoStocks 的 technical_indicators.py，供自動選股初篩、第一層大盤氣候判定與第二層個股量化評分共用",
+      "dependencies": [
+        "config-manager"
+      ],
+      "synthesis": {
+        "filePath": "src/services/technical_indicators.py",
+        "status": "completed",
+        "intentSignal": "實作 compute_all_indicators 函式，針對 K 線列表計算均線、均量、RSI、MACD、DMI 及 ATR 並寫回各日 K 線字典中",
+        "extractedConstraints": [
+          "採用純 Python 實作技術指標計算，不依賴需編譯的外部 C 擴展套件",
+          "當歷史 K 線筆數不足時需安全回退為 None 而不中斷流程"
+        ],
+        "userOverridden": false
+      },
+      "trace": {
+        "stale": false,
+        "lastImplementedPrompt": ""
+      }
+    },
+    {
+      "id": "stock-data-fetcher",
+      "name": "台股大盤與個股數據擷取器",
+      "produce": "從外部公開台股 API 擷取全市場當日成交金額排行數據、大盤 (TAIEX) 與個股之歷史日 K 線與即時報價，並於記憶體中進行 TTL 快取管理",
+      "vibeNotes": "參照 AIAutoStocks 的 stock_fetcher.py，除擷取大盤與個股歷史 K 線外，新增擷取台股市場每日收盤行情（含收盤價與成交金額），供自動選股器篩選「成交金額 Top 20」與「股價 < 100 元且成交金額 Top 20」使用",
+      "dependencies": [
+        "config-manager"
+      ],
+      "synthesis": {
+        "filePath": "src/services/stock_fetcher.py",
+        "status": "completed",
+        "intentSignal": "自 TWSE / TPEx / Yahoo Finance 等公開數據源擷取台股全市場成交金額排行、個股與 TAIEX 大盤歷史 K 線及最新報價，清理驗證後快取於記憶體中",
+        "extractedConstraints": [
+          "不依賴任何外部資料庫伺服器，使用記憶體快取減少重複外部 API 請求",
+          "必須支援取得個股當日收盤價與成交金額 (Turnover Value)，以供大盤核心榜與百元精選榜排序篩選"
+        ],
+        "userOverridden": false
+      },
+      "trace": {
+        "stale": false,
+        "lastImplementedPrompt": ""
+      }
+    },
+    {
+      "id": "auto-stock-selector",
+      "name": "智慧自動選股篩選器",
+      "produce": "依據三大榜單規則：1. 大盤核心榜（成交金額 Top 20）、2. 百元精選榜（股價 < 100 元且成交金額 Top 20）、3. 人氣 ETF 榜（固定追蹤 0050、0056、00878、00929 等龍頭），自動挑選並載入對應 K 線與技術指標供第二層分析",
+      "vibeNotes": "實作三大自動選股方式：支援依最新交易日全市場或熱門池成交金額排出 Top 20「大盤核心榜」、過濾收盤價 < 100 元後依成交金額排出 Top 20「百元精選榜」，以及固定追蹤市值與高股息龍頭之「人氣 ETF 榜」",
+      "dependencies": [
+        "config-manager",
+        "stock-data-fetcher",
+        "technical-indicator-engine"
+      ],
+      "synthesis": {
+        "filePath": "src/services/auto_selector.py",
+        "status": "completed",
+        "intentSignal": "實作三大自動選股榜單篩選邏輯（core_top20 大盤核心榜、under100_top20 百元精選榜、popular_etf 人氣 ETF 榜），自動篩選標的、拉取歷史 K 線並計算技術指標後回傳",
+        "extractedConstraints": [
+          "必須完整實作 1. 大盤核心榜（成交金額 Top 20）、2. 百元精選榜（股價 < 100 元 且 成交金額 Top 20）、3. 人氣 ETF 榜（固定追蹤 0050、0056、00878、00929 等）三種自動選股模式",
+          "回傳結果需包含各入選股票之代號、中文名稱、最新收盤價、成交金額與所屬榜單標籤"
+        ],
+        "userOverridden": false
+      },
+      "trace": {
+        "stale": false,
+        "lastImplementedPrompt": ""
+      }
+    },
+    {
+      "id": "user-llm-client",
+      "name": "使用者自備金鑰 LLM 調用器",
+      "produce": "接收使用者自網頁前端傳入的 LLM API Key 與模型設定，執行具備 Structured Outputs (JSON Schema) 驗證與速率退避保護的 AI 調用",
+      "vibeNotes": "實作「LLM API Key 使用者自行輸入，價格自行承擔」：支援使用者輸入自備 API Key，於當次分析任務中在記憶體內調用並統計 Token 消耗",
+      "dependencies": [
+        "config-manager"
+      ],
+      "synthesis": {
+        "filePath": "src/services/llm_client.py",
+        "status": "completed",
+        "intentSignal": "封裝 LLM API 呼叫介面，動態使用前端請求帶入的 api_key 與 model_name，支援 Pydantic response_schema 強制輸出 JSON 並處理 429 速率限制重試",
+        "extractedConstraints": [
+          "嚴禁將使用者輸入的 API Key 寫入任何日誌檔或伺服器磁碟",
+          "若金鑰無效或額度耗盡，必須即時中斷分析並回傳明確錯誤原因給前端"
+        ],
+        "userOverridden": false
+      },
+      "trace": {
+        "stale": false,
+        "lastImplementedPrompt": ""
+      }
+    },
+    {
+      "id": "layer1-regime-agent",
+      "name": "第一層：大盤氣候診斷代理",
+      "produce": "分析台股大盤加權指數 (TAIEX) 近 30 日 K 線與技術指標，判定六階市場狀態、五階交易姿態、建議現金儲備比、允許操作型態與戰術特別指令",
+      "vibeNotes": "完整保留 @AIAutoStocks 的 src/agents/regime_agent.py 邏輯與六階氣候/五階姿態定義",
+      "dependencies": [
+        "config-manager",
+        "technical-indicator-engine",
+        "user-llm-client"
+      ],
+      "synthesis": {
+        "filePath": "src/agents/regime_agent.py",
+        "status": "completed",
+        "intentSignal": "定義 MarketRegimeAssessment Pydantic 模型，將 TAIEX 近 30 日 K 線與技術指標送入使用者指定的 LLM，產出結構化的大盤氣候與交易姿態診斷報告",
+        "extractedConstraints": [
+          "必須使用 Strict JSON Schema (MarketRegimeAssessment) 強制輸出標準 JSON",
+          "所有戰術指令與宏觀分析理由皆須使用繁體中文"
+        ],
+        "userOverridden": false
+      },
+      "trace": {
+        "stale": false,
+        "lastImplementedPrompt": ""
+      }
+    },
+    {
+      "id": "layer2-analyst-agent",
+      "name": "第二層：個股量化技術分析師代理",
+      "produce": "結合第一層大盤氣候結果與金融分析 Skills，對三大榜單自動挑選出的個股進行五維度量化評分（趨勢、動能、量能、安全、大盤一致性）與總分排序",
+      "vibeNotes": "完整保留 @AIAutoStocks 的 src/agents/analyst_agent.py 五維度評分 (各 0-20 分，總分 100 分)，移除資料庫讀寫依賴，到此結束分析流程，不進入第三層買賣決策",
+      "dependencies": [
+        "config-manager",
+        "technical-indicator-engine",
+        "user-llm-client",
+        "layer1-regime-agent"
+      ],
+      "synthesis": {
+        "filePath": "src/agents/analyst_agent.py",
+        "status": "completed",
+        "intentSignal": "定義 AnalystStockScore 模型，結合 DEFAULT_TRADING_SKILLS，對自動入選個股逐一進行五維度量化評分、加總計算 total_score (0-100) 並按總分由高至低排序回傳",
+        "extractedConstraints": [
+          "只保留到第二層技術分析師評分與排序，嚴禁包含第三層買賣股數決策、委託下單或資料庫讀寫邏輯",
+          "分析理由必須使用繁體中文並控制在 80~150 字內，精準指出關鍵技術指標信號"
+        ],
+        "userOverridden": false
+      },
+      "trace": {
+        "stale": false,
+        "lastImplementedPrompt": ""
+      }
+    },
+    {
+      "id": "web-server",
+      "name": "股票分析網頁伺服器",
+      "produce": "作為系統唯一入口，提供前端靜態網頁託管與 RESTful API，支援選擇三大自動選股榜單、接收使用者自備 LLM API Key 觸發兩層式分析、即時停止任務、查詢記憶體日誌及匯出下載結構化 Markdown 分析報告",
+      "vibeNotes": "純 Web Server 架構，移除 Discord 推播，所有分析結果純粹由 Web 介面輸出，並提供將第一層大盤診斷與第二層個股五維度評分排行榜轉為完整 Markdown (.md) 報告下載之 API",
+      "dependencies": [
+        "config-manager",
+        "stock-data-fetcher",
+        "auto-stock-selector",
+        "user-llm-client",
+        "layer1-regime-agent",
+        "layer2-analyst-agent"
+      ],
+      "synthesis": {
+        "filePath": "src/web_server.py",
+        "status": "completed",
+        "intentSignal": "使用 FastAPI 與背景執行緒執行「第一層大盤診斷 -> 三大榜單自動選股 -> 第二層個股五維度評分」流程，提供榜單預覽、進度輪詢、停止控制 (stop_requested)、Web 結果查詢與 Markdown 報告生成下載 API",
+        "extractedConstraints": [
+          "完全不依賴外部資料庫或 Discord 推播，所有執行狀態、分析結果與 Markdown 報告生成皆於 Web Server 記憶體中完成",
+          "使用者自備的 LLM API Key 僅限於當次請求建立的背景任務記憶體中使用，任務結束即釋放"
+        ],
+        "userOverridden": false
+      },
+      "trace": {
+        "stale": false,
+        "lastImplementedPrompt": ""
+      }
+    },
+    {
+      "id": "web-dashboard-ui",
+      "name": "AI 兩層式選股分析互動網頁前端",
+      "produce": "渲染現代深色金融儀表板介面，提供使用者輸入自備 LLM API Key、切換三大自動選股榜單（大盤核心榜 / 百元精選榜 / 人氣 ETF 榜）、一鍵啟動或停止分析、於網頁檢視第一層大盤氣候與第二層五維度評分排行榜，並支援一鍵下載 Markdown (.md) 分析報告",
+      "vibeNotes": "純 Web 輸出介面，提供頂部「使用者自備 LLM API Key (費用自負)」設定區（存於瀏覽器 LocalStorage）、三大自動選股榜單切換卡片、第一層大盤氣候橫幅、第二層五維度得分排行卡片、Markdown 報告一鍵下載按鈕與即時執行日誌面板",
+      "dependencies": [
+        "web-server"
+      ],
+      "synthesis": {
+        "filePath": "src/static/index.html",
+        "status": "completed",
+        "intentSignal": "以 HTML5/CSS3/Vanilla JS 建立單頁式儀表板，將使用者輸入的 API Key 存於瀏覽器 LocalStorage，提供三大自動選股榜單選擇器，視覺化呈現第一層大盤診斷與第二層個股五維度評分明細，並提供下載完整 Markdown (.md) 分析報告功能",
+        "extractedConstraints": [
+          "介面需明確提示 LLM API Key 由使用者自行輸入且調用費用自行承擔",
+          "清楚提供三大自動選股榜單切換、五維度分數排行榜展示，以及將當次分析報告下載為 .md 檔案的功能"
+        ],
+        "userOverridden": false
+      },
+      "trace": {
+        "stale": false,
+        "lastImplementedPrompt": ""
+      }
+    }
+  ]
+}

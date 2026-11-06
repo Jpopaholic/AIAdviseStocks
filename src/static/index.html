@@ -1,0 +1,1320 @@
+<!-- // Path: src/static/index.html -->
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AIAdviseStocks — 台股兩層式 AI 選股與五維度量化技術分析儀表板</title>
+  <style>
+    :root {
+      --bg-primary: #0b0f19;
+      --bg-secondary: #111827;
+      --bg-card: #161f33;
+      --bg-card-hover: #1d2942;
+      --border-color: #263554;
+      --text-primary: #f1f5f9;
+      --text-secondary: #94a3b8;
+      --text-muted: #64748b;
+      --accent-blue: #38bdf8;
+      --accent-indigo: #6366f1;
+      --accent-emerald: #10b981;
+      --accent-amber: #f59e0b;
+      --accent-rose: #f43f5e;
+      --tw-up: #ef4444;     /* 台股紅漲 */
+      --tw-down: #22c55e;   /* 台股綠跌 */
+      --radius: 12px;
+      --shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.45);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft JhengHei", "PingFang TC", sans-serif;
+      background: radial-gradient(circle at top right, #172554 0%, var(--bg-primary) 45%);
+      color: var(--text-primary);
+      line-height: 1.55;
+      min-height: 100vh;
+      padding-bottom: 48px;
+    }
+
+    .container {
+      max-width: 1380px;
+      margin: 0 auto;
+      padding: 20px 24px;
+    }
+
+    /* Header */
+    .top-header {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      padding: 18px 24px;
+      background: rgba(22, 31, 51, 0.85);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius);
+      backdrop-filter: blur(12px);
+      margin-bottom: 20px;
+      box-shadow: var(--shadow);
+    }
+
+    .brand-title {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-badge {
+      background: linear-gradient(135deg, var(--accent-blue), var(--accent-indigo));
+      color: #fff;
+      font-weight: 800;
+      font-size: 0.85rem;
+      padding: 6px 10px;
+      border-radius: 8px;
+      letter-spacing: 0.5px;
+    }
+
+    .brand-title h1 {
+      font-size: 1.35rem;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .brand-subtitle {
+      font-size: 0.84rem;
+      color: var(--text-secondary);
+      margin-top: 2px;
+    }
+
+    .header-badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      background: rgba(56, 189, 248, 0.12);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      color: var(--accent-blue);
+    }
+
+    /* Section Grid */
+    .control-grid {
+      display: grid;
+      grid-template-columns: 1.1fr 1.4fr;
+      gap: 20px;
+      margin-bottom: 20px;
+    }
+
+    @media (max-width: 1024px) {
+      .control-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius);
+      padding: 20px;
+      box-shadow: var(--shadow);
+    }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 14px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    }
+
+    .card-title {
+      font-size: 1.02rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #f8fafc;
+    }
+
+    /* BYOK Form */
+    .byok-notice {
+      background: rgba(245, 158, 11, 0.12);
+      border: 1px solid rgba(245, 158, 11, 0.35);
+      color: #fcd34d;
+      padding: 10px 12px;
+      border-radius: 8px;
+      font-size: 0.82rem;
+      margin-bottom: 14px;
+    }
+
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    @media (max-width: 640px) {
+      .form-row {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-bottom: 12px;
+    }
+
+    .form-group label {
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+    }
+
+    .input-with-btn {
+      display: flex;
+      gap: 8px;
+    }
+
+    input[type="text"],
+    input[type="password"],
+    select {
+      width: 100%;
+      padding: 10px 12px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      color: var(--text-primary);
+      font-size: 0.9rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    input:focus,
+    select:focus {
+      border-color: var(--accent-blue);
+    }
+
+    /* Three Leaderboards Cards */
+    .boards-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    @media (max-width: 768px) {
+      .boards-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .board-card {
+      background: var(--bg-secondary);
+      border: 2px solid var(--border-color);
+      border-radius: 10px;
+      padding: 14px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      position: relative;
+    }
+
+    .board-card:hover {
+      background: var(--bg-card-hover);
+      border-color: #475569;
+    }
+
+    .board-card.active {
+      background: rgba(56, 189, 248, 0.11);
+      border-color: var(--accent-blue);
+      box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.3);
+    }
+
+    .board-card-tag {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: var(--accent-blue);
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+
+    .board-card-title {
+      font-size: 0.96rem;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 6px;
+    }
+
+    .board-card-desc {
+      font-size: 0.78rem;
+      color: var(--text-secondary);
+      line-height: 1.4;
+    }
+
+    /* Buttons */
+    .btn-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      margin-top: 8px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 10px 18px;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      border: 1px solid transparent;
+      cursor: pointer;
+      transition: all 0.18s ease;
+    }
+
+    .btn:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #0284c7, #4f46e5);
+      color: #fff;
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      filter: brightness(1.12);
+    }
+
+    .btn-danger {
+      background: rgba(244, 63, 94, 0.18);
+      border-color: rgba(244, 63, 94, 0.5);
+      color: #fda4af;
+    }
+
+    .btn-danger:hover:not(:disabled) {
+      background: rgba(244, 63, 94, 0.3);
+    }
+
+    .btn-emerald {
+      background: rgba(16, 185, 129, 0.18);
+      border-color: rgba(16, 185, 129, 0.45);
+      color: #6ee7b7;
+    }
+
+    .btn-emerald:hover:not(:disabled) {
+      background: rgba(16, 185, 129, 0.3);
+    }
+
+    .btn-secondary {
+      background: var(--bg-secondary);
+      border-color: var(--border-color);
+      color: var(--text-primary);
+    }
+
+    .btn-secondary:hover:not(:disabled) {
+      background: var(--bg-card-hover);
+    }
+
+    /* Progress & Status Bar */
+    .status-banner {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius);
+      padding: 16px 20px;
+      margin-bottom: 20px;
+      box-shadow: var(--shadow);
+    }
+
+    .status-top {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+
+    .phase-indicator {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 600;
+      font-size: 0.95rem;
+    }
+
+    .pulse-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--text-muted);
+    }
+
+    .pulse-dot.running {
+      background: var(--accent-blue);
+      box-shadow: 0 0 10px var(--accent-blue);
+      animation: pulse 1.2s infinite;
+    }
+
+    .pulse-dot.completed {
+      background: var(--accent-emerald);
+    }
+
+    .pulse-dot.error {
+      background: var(--accent-rose);
+    }
+
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.35); opacity: 0.55; }
+    }
+
+    .progress-track {
+      width: 100%;
+      height: 10px;
+      background: var(--bg-secondary);
+      border-radius: 999px;
+      overflow: hidden;
+      border: 1px solid var(--border-color);
+    }
+
+    .progress-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--accent-blue), var(--accent-indigo), var(--accent-emerald));
+      transition: width 0.35s ease;
+    }
+
+    .error-alert {
+      margin-top: 12px;
+      padding: 12px 14px;
+      border-radius: 8px;
+      background: rgba(244, 63, 94, 0.14);
+      border: 1px solid rgba(244, 63, 94, 0.45);
+      color: #fecdd3;
+      font-size: 0.88rem;
+      display: none;
+    }
+
+    /* Layer 1 Regime Banner */
+    .regime-card {
+      margin-bottom: 20px;
+      border-left: 4px solid var(--accent-blue);
+    }
+
+    .regime-metrics {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(185px, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .metric-box {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      padding: 12px 14px;
+    }
+
+    .metric-label {
+      font-size: 0.76rem;
+      color: var(--text-secondary);
+      margin-bottom: 4px;
+    }
+
+    .metric-value {
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .directive-box {
+      background: rgba(56, 189, 248, 0.08);
+      border: 1px solid rgba(56, 189, 248, 0.28);
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin-bottom: 12px;
+    }
+
+    .directive-title {
+      font-size: 0.82rem;
+      font-weight: 700;
+      color: var(--accent-blue);
+      margin-bottom: 4px;
+    }
+
+    /* Layer 2 Table & Score Bars */
+    .table-wrapper {
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.88rem;
+    }
+
+    th, td {
+      padding: 12px 10px;
+      text-align: left;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      vertical-align: top;
+    }
+
+    th {
+      background: rgba(17, 24, 39, 0.75);
+      color: var(--text-secondary);
+      font-weight: 600;
+      font-size: 0.78rem;
+      white-space: nowrap;
+    }
+
+    tr:hover td {
+      background: rgba(255, 255, 255, 0.025);
+    }
+
+    .rank-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      font-weight: 800;
+      font-size: 0.82rem;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+    }
+
+    .rank-1 { background: linear-gradient(135deg, #f59e0b, #d97706); color: #fff; border: none; }
+    .rank-2 { background: linear-gradient(135deg, #94a3b8, #64748b); color: #fff; border: none; }
+    .rank-3 { background: linear-gradient(135deg, #b45309, #92400e); color: #fff; border: none; }
+
+    .total-score-pill {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 8px;
+      font-weight: 800;
+      font-size: 0.98rem;
+    }
+
+    .score-high { background: rgba(239, 68, 68, 0.18); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.4); }
+    .score-mid { background: rgba(56, 189, 248, 0.16); color: #7dd3fc; border: 1px solid rgba(56, 189, 248, 0.35); }
+    .score-low { background: rgba(148, 163, 184, 0.15); color: #cbd5e1; border: 1px solid rgba(148, 163, 184, 0.3); }
+
+    .dim-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      min-width: 230px;
+    }
+
+    .dim-chip {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      padding: 3px 7px;
+      font-size: 0.75rem;
+      white-space: nowrap;
+    }
+
+    .dim-chip strong {
+      color: var(--accent-blue);
+    }
+
+    .up-text { color: var(--tw-up); font-weight: 700; }
+    .down-text { color: var(--tw-down); font-weight: 700; }
+
+    /* Preview & Logs Bottom Grid */
+    .bottom-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-top: 20px;
+    }
+
+    @media (max-width: 1024px) {
+      .bottom-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .log-console {
+      background: #070b12;
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 12px;
+      height: 290px;
+      overflow-y: auto;
+      font-family: "Consolas", "Monaco", monospace;
+      font-size: 0.8rem;
+      color: #a7f3d0;
+    }
+
+    .log-line {
+      margin-bottom: 4px;
+      word-break: break-all;
+    }
+
+    .log-line.error { color: #fda4af; }
+    .log-line.warn { color: #fde68a; }
+
+    .markdown-preview-box {
+      background: #070b12;
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 12px;
+      height: 290px;
+      overflow-y: auto;
+      font-family: "Consolas", "Monaco", monospace;
+      font-size: 0.8rem;
+      color: #e2e8f0;
+      white-space: pre-wrap;
+    }
+
+    .candidate-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+      max-height: 120px;
+      overflow-y: auto;
+    }
+
+    .cand-chip {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      padding: 4px 9px;
+      font-size: 0.78rem;
+      color: var(--text-primary);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Top Header -->
+    <header class="top-header">
+      <div class="brand-title">
+        <span class="brand-badge">AIAdviseStocks</span>
+        <div>
+          <h1>台股兩層式 AI 選股與五維度量化分析系統</h1>
+          <div class="brand-subtitle">保留第一層大盤氣候診斷 + 第二層個股五維度技術評分｜三大榜單自動選股｜BYOK 自備金鑰｜純 Web 與 Markdown 報告下載</div>
+        </div>
+      </div>
+      <div class="header-badges">
+        <span class="pill" id="tokenUsagePill">Token 消耗：0</span>
+        <button class="btn btn-emerald" id="btnDownloadMdTop" onclick="downloadMarkdownReport()" disabled>
+          📥 下載 Markdown (.md) 報告
+        </button>
+      </div>
+    </header>
+
+    <!-- Control Grid: BYOK Key + 3 Leaderboards -->
+    <div class="control-grid">
+      <!-- Left: BYOK LLM API Key Settings -->
+      <section class="card">
+        <div class="card-header">
+          <div class="card-title">🔑 使用者自備金鑰設定 (BYOK — 費用自負)</div>
+          <span style="font-size: 0.76rem; color: var(--text-secondary);">LocalStorage 本地保存</span>
+        </div>
+        <div class="byok-notice">
+          💡 <strong>安全與費用聲明：</strong>請輸入您個人的 Gemini 或 OpenAI API Key。金鑰僅儲存於您的瀏覽器 LocalStorage 並在當次分析時於記憶體調用，<strong>API 調用費用由使用者自行承擔</strong>，伺服器絕不落地儲存或記錄金鑰。
+        </div>
+
+        <div class="form-group">
+          <label for="apiKeyInput">LLM API Key (支援 Google Gemini `AIza...` 或 OpenAI `sk-...`)</label>
+          <div class="input-with-btn">
+            <input type="password" id="apiKeyInput" placeholder="請貼上您的 Gemini API Key 或 OpenAI API Key..." autocomplete="off" />
+            <button class="btn btn-secondary" type="button" onclick="toggleApiKeyVisibility()" id="btnToggleKey">顯示</button>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="providerSelect">AI 供應商 (Provider)</label>
+            <select id="providerSelect" onchange="onProviderChange()">
+              <option value="auto">自動偵測 (依 Key 字首判斷)</option>
+              <option value="gemini">Google Gemini</option>
+              <option value="openai">OpenAI</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="modelSelect">指定推理模型 (Model)</label>
+            <select id="modelSelect">
+              <option value="gemini-2.5-flash">gemini-2.5-flash (推薦・高速低成本)</option>
+              <option value="gemini-2.5-pro">gemini-2.5-pro (深度推理)</option>
+              <option value="gpt-4o-mini">gpt-4o-mini (OpenAI 高速)</option>
+              <option value="gpt-4o">gpt-4o (OpenAI 旗艦)</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right: Three Auto-Selection Leaderboards -->
+      <section class="card">
+        <div class="card-header">
+          <div class="card-title">🏆 三大自動選股榜單模式 (Auto-Selection Leaderboards)</div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <label for="topNSelect" style="font-size: 0.8rem; color: var(--text-secondary);">挑選檔數：</label>
+            <select id="topNSelect" style="width: 95px; padding: 6px 8px;" onchange="previewSelectedBoard(false)">
+              <option value="5">Top 5 檔</option>
+              <option value="10">Top 10 檔</option>
+              <option value="15">Top 15 檔</option>
+              <option value="20" selected>Top 20 檔</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="boards-grid" id="boardsContainer">
+          <div class="board-card active" data-board="core_top20" onclick="selectBoard('core_top20')">
+            <div class="board-card-tag">Leaderboard 01</div>
+            <div class="board-card-title">1. 大盤核心榜</div>
+            <div class="board-card-desc">依當日成交金額排序 Top 20 指標股，聚焦市場主力資金重心與大型權值動能股。</div>
+          </div>
+          <div class="board-card" data-board="under100_top20" onclick="selectBoard('under100_top20')">
+            <div class="board-card-tag">Leaderboard 02</div>
+            <div class="board-card-title">2. 百元精選榜</div>
+            <div class="board-card-desc">股價低於 100 元且當日成交金額排序 Top 20，兼顧高流動性與中小型親民價位。</div>
+          </div>
+          <div class="board-card" data-board="popular_etf" onclick="selectBoard('popular_etf')">
+            <div class="board-card-tag">Leaderboard 03</div>
+            <div class="board-card-title">3. 人氣 ETF 榜</div>
+            <div class="board-card-desc">固定追蹤 0050、0056、00878、00929、00919、006208 等市值型與高股息龍頭 ETF。</div>
+          </div>
+        </div>
+
+        <div class="btn-bar">
+          <button class="btn btn-primary" id="btnStartAnalysis" onclick="startTwoLayerAnalysis()">
+            🚀 啟動兩層式 AI 選股分析
+          </button>
+          <button class="btn btn-danger" id="btnStopAnalysis" onclick="stopAnalysis()" disabled>
+            🛑 停止執行 (Stop Flag)
+          </button>
+          <button class="btn btn-secondary" id="btnPreviewBoard" onclick="previewSelectedBoard(true)">
+            🔄 重新整理榜單預覽
+          </button>
+          <button class="btn btn-emerald" id="btnDownloadMdMain" onclick="downloadMarkdownReport()" disabled>
+            📥 下載 .md 分析報告
+          </button>
+        </div>
+
+        <div style="margin-top: 12px;">
+          <div style="font-size: 0.78rem; color: var(--text-secondary);" id="previewHeaderLabel">
+            📋 榜單預覽入選標的：載入中...
+          </div>
+          <div class="candidate-chips" id="candidatePreviewChips"></div>
+        </div>
+      </section>
+    </div>
+
+    <!-- Real-time Progress Banner -->
+    <section class="status-banner">
+      <div class="status-top">
+        <div class="phase-indicator">
+          <span class="pulse-dot" id="statusDot"></span>
+          <span id="phaseLabelText">系統待命準備中 — 請輸入 API Key 並選擇榜單後點擊「啟動兩層式 AI 選股分析」</span>
+        </div>
+        <div style="font-size: 0.84rem; color: var(--text-secondary);" id="progressStepText">
+          進度：0 / 0
+        </div>
+      </div>
+      <div class="progress-track">
+        <div class="progress-fill" id="progressBarFill"></div>
+      </div>
+      <div class="error-alert" id="errorAlertBox"></div>
+    </section>
+
+    <!-- Layer 1: Market Regime Assessment -->
+    <section class="card regime-card">
+      <div class="card-header">
+        <div class="card-title">🧭 第一層：大盤氣候診斷報告 (Layer 1 Market Regime Assessment)</div>
+        <span style="font-size: 0.8rem; color: var(--text-secondary);" id="regimeTimestamp">尚未執行診斷</span>
+      </div>
+
+      <div class="regime-metrics">
+        <div class="metric-box">
+          <div class="metric-label">大盤加權指數 (TAIEX)</div>
+          <div class="metric-value" id="regTaiexClose">--</div>
+        </div>
+        <div class="metric-box">
+          <div class="metric-label">六階市場狀態 (Regime)</div>
+          <div class="metric-value" id="regState" style="color: var(--accent-blue);">--</div>
+        </div>
+        <div class="metric-box">
+          <div class="metric-label">五階交易姿態 (Posture)</div>
+          <div class="metric-value" id="regPosture" style="color: var(--accent-emerald);">--</div>
+        </div>
+        <div class="metric-box">
+          <div class="metric-label">建議最低現金儲備比</div>
+          <div class="metric-value" id="regCashRatio">--</div>
+        </div>
+        <div class="metric-box">
+          <div class="metric-label">風險限額乘數 (Risk Mult.)</div>
+          <div class="metric-value" id="regRiskMult">--</div>
+        </div>
+        <div class="metric-box">
+          <div class="metric-label">建議操作型態 (Allowed Styles)</div>
+          <div class="metric-value" id="regAllowedStyles" style="font-size: 0.92rem;">--</div>
+        </div>
+      </div>
+
+      <div class="directive-box">
+        <div class="directive-title">🎯 第一層戰術特別指令 (Tactical Directive)</div>
+        <div id="regDirectiveText" style="font-size: 0.92rem; color: #f8fafc;">
+          執行分析後，此處將顯示 AI 宏觀專家針對 TAIEX 近 30 日價量與均線結構給出的動態姿態與部位風控指引。
+        </div>
+      </div>
+
+      <div style="font-size: 0.86rem; color: var(--text-secondary);">
+        <strong>📝 大盤宏觀分析理由：</strong>
+        <span id="regReasonText">尚無資料。</span>
+      </div>
+    </section>
+
+    <!-- Layer 2: 5-Dimension Stock Analyst Score Leaderboard -->
+    <section class="card">
+      <div class="card-header">
+        <div class="card-title">
+          📊 第二層：個股五維度量化技術分析評分排行榜 (Layer 2 Analyst Stock Score)
+          <span class="pill" id="activeBoardPill">大盤核心榜</span>
+        </div>
+        <div style="font-size: 0.8rem; color: var(--text-secondary);">
+          五維度各 0~20 分（趨勢 / 動能 / 量能 / 安全防守 / 大盤一致性），由 Python 加總滿分 100 分並按總分排序
+        </div>
+      </div>
+
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>排名</th>
+              <th>股票代號 / 名稱</th>
+              <th>最新收盤價</th>
+              <th>漲跌幅</th>
+              <th>成交金額</th>
+              <th>量化總分 (100)</th>
+              <th>五維度得分明細 (各 0~20 分)</th>
+              <th>技術指標摘要</th>
+              <th>AI 量化技術分析理由 (80~150字)</th>
+            </tr>
+          </thead>
+          <tbody id="analystScoresTbody">
+            <tr>
+              <td colspan="9" style="text-align: center; padding: 36px; color: var(--text-secondary);">
+                尚未產生個股評分資料。請於上方輸入自備 LLM API Key 並點擊「🚀 啟動兩層式 AI 選股分析」。
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Bottom Grid: Real-time Logs & Markdown Preview -->
+    <div class="bottom-grid">
+      <section class="card">
+        <div class="card-header">
+          <div class="card-title">🖥️ 系統即時執行日誌 (Memory Logs)</div>
+          <span style="font-size: 0.76rem; color: var(--text-secondary);">UTC+8 台灣時間</span>
+        </div>
+        <div class="log-console" id="logConsole">
+          <div class="log-line">[系統就緒] 等待使用者啟動兩層式選股分析任務...</div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-header">
+          <div class="card-title">📄 Markdown (.md) 報告即時預覽與匯出</div>
+          <div style="display: flex; gap: 8px;">
+            <button class="btn btn-secondary" style="padding: 5px 10px; font-size: 0.78rem;" onclick="copyMarkdownToClipboard()" id="btnCopyMd" disabled>
+              📋 複製 Markdown
+            </button>
+            <button class="btn btn-emerald" style="padding: 5px 10px; font-size: 0.78rem;" onclick="downloadMarkdownReport()" id="btnDownloadMdBottom" disabled>
+              📥 下載 .md 檔案
+            </button>
+          </div>
+        </div>
+        <div class="markdown-preview-box" id="markdownPreviewBox">執行完成後，此處將自動生成結構化 Markdown (.md) 分析報告，供直接檢視、複製或一鍵下載儲存。</div>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    const LS_API_KEY = "ai_advise_stocks_user_api_key";
+    const LS_PROVIDER = "ai_advise_stocks_provider";
+    const LS_MODEL = "ai_advise_stocks_model";
+    const LS_BOARD = "ai_advise_stocks_board";
+
+    let currentBoardKey = "core_top20";
+    let isClientRunning = false;
+    let clientStopRequested = false;
+    let latestReportId = null;
+    let latestMarkdownContent = "";
+    let clientLogs = [];
+
+    const REGIME_LABELS = {
+      STRONG_BULL: "🔥 強勢多頭 (STRONG_BULL)",
+      REBOUND_BULL: "📈 驚驚漲/震盪偏多 (REBOUND_BULL)",
+      CALM_RANGE: "⚖️ 低波動橫盤 (CALM_RANGE)",
+      VOLATILE_RANGE: "🌊 高波動震盪 (VOLATILE_RANGE)",
+      CORRECTION_BEAR: "📉 震盪修正 (CORRECTION_BEAR)",
+      PANIC_BEAR: "❄️ 恐慌空頭 (PANIC_BEAR)"
+    };
+
+    const POSTURE_LABELS = {
+      STRONG_ATTACK: "⚔️ 強攻攻勢 (STRONG_ATTACK)",
+      MODERATE_ATTACK: "🎯 穩健進攻 (MODERATE_ATTACK)",
+      CHOPPY_TACTICAL: "🔄 震盪靈活 (CHOPPY_TACTICAL)",
+      DEFENSIVE_ACCUMULATION: "🛡️ 防禦承接 (DEFENSIVE_ACCUMULATION)",
+      STRICT_DEFENSE: "🔒 極度保守 (STRICT_DEFENSE)"
+    };
+
+    window.addEventListener("DOMContentLoaded", () => {
+      const savedKey = localStorage.getItem(LS_API_KEY) || "";
+      const savedProvider = localStorage.getItem(LS_PROVIDER) || "auto";
+      const savedModel = localStorage.getItem(LS_MODEL) || "gemini-2.5-flash";
+      const savedBoard = localStorage.getItem(LS_BOARD) || "core_top20";
+
+      document.getElementById("apiKeyInput").value = savedKey;
+      document.getElementById("providerSelect").value = savedProvider;
+      document.getElementById("modelSelect").value = savedModel;
+
+      document.getElementById("apiKeyInput").addEventListener("input", (e) => {
+        localStorage.setItem(LS_API_KEY, e.target.value.trim());
+      });
+      document.getElementById("providerSelect").addEventListener("change", (e) => {
+        localStorage.setItem(LS_PROVIDER, e.target.value);
+      });
+      document.getElementById("modelSelect").addEventListener("change", (e) => {
+        localStorage.setItem(LS_MODEL, e.target.value);
+      });
+
+      selectBoard(savedBoard);
+    });
+
+    function nowTwStr() {
+      const d = new Date();
+      return d.toLocaleString("sv-SE", { timeZone: "Asia/Taipei" });
+    }
+
+    function appendClientLog(msg, level = "INFO") {
+      const line = `[${nowTwStr()}] [${level}] ${msg}`;
+      clientLogs.push(line);
+      const logEl = document.getElementById("logConsole");
+      logEl.innerHTML = clientLogs.map((l) => {
+        let cls = "log-line";
+        if (l.includes("[ERROR]")) cls += " error";
+        else if (l.includes("[WARNING]")) cls += " warn";
+        return `<div class="${cls}">${escapeHtml(l)}</div>`;
+      }).join("");
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function updateProgressBar(cur, tot, phaseLabel, dotState = "running") {
+      document.getElementById("phaseLabelText").textContent = phaseLabel;
+      const pct = tot > 0 ? Math.min(100, Math.round((cur / tot) * 100)) : 0;
+      document.getElementById("progressStepText").textContent = `進度：${cur} / ${tot} (${pct}%)`;
+      document.getElementById("progressBarFill").style.width = `${pct}%`;
+
+      const dot = document.getElementById("statusDot");
+      dot.className = "pulse-dot";
+      if (dotState) dot.classList.add(dotState);
+    }
+
+    function toggleApiKeyVisibility() {
+      const input = document.getElementById("apiKeyInput");
+      const btn = document.getElementById("btnToggleKey");
+      if (input.type === "password") {
+        input.type = "text";
+        btn.textContent = "隱藏";
+      } else {
+        input.type = "password";
+        btn.textContent = "顯示";
+      }
+    }
+
+    function onProviderChange() {
+      const prov = document.getElementById("providerSelect").value;
+      const modelSel = document.getElementById("modelSelect");
+      if (prov === "openai" && modelSel.value.startsWith("gemini")) {
+        modelSel.value = "gpt-4o-mini";
+      } else if (prov === "gemini" && modelSel.value.startsWith("gpt")) {
+        modelSel.value = "gemini-2.5-flash";
+      }
+      localStorage.setItem(LS_MODEL, modelSel.value);
+    }
+
+    function selectBoard(boardKey) {
+      currentBoardKey = boardKey;
+      localStorage.setItem(LS_BOARD, boardKey);
+      document.querySelectorAll(".board-card").forEach((card) => {
+        card.classList.toggle("active", card.getAttribute("data-board") === boardKey);
+      });
+      previewSelectedBoard(false);
+    }
+
+    async function previewSelectedBoard(forceRefresh = false) {
+      const topN = document.getElementById("topNSelect").value || 20;
+      const headerEl = document.getElementById("previewHeaderLabel");
+      const chipsEl = document.getElementById("candidatePreviewChips");
+      headerEl.textContent = "📋 正在載入榜單預覽標的...";
+
+      try {
+        const res = await fetch(`/api/boards/${currentBoardKey}/preview?top_n=${topN}&refresh=${forceRefresh}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "預覽失敗");
+
+        headerEl.textContent = `📋 【${data.board_name}】預覽入選標的（共 ${data.count} 檔，更新於 ${data.updated_at}）：`;
+        chipsEl.innerHTML = (data.candidates || []).map((c, idx) => {
+          const chg = Number(c.change_pct || 0);
+          const chgClass = chg > 0 ? "up-text" : (chg < 0 ? "down-text" : "");
+          const chgStr = chg > 0 ? `+${chg.toFixed(2)}%` : `${chg.toFixed(2)}%`;
+          const tvYi = (Number(c.turnover || 0) / 1e8).toFixed(1);
+          return `<span class="cand-chip">#${idx + 1} <strong>${c.stock_code}</strong> ${c.stock_name} (${Number(c.close || 0).toFixed(2)}元 <span class="${chgClass}">${chgStr}</span> / ${tvYi}億)</span>`;
+        }).join("");
+      } catch (err) {
+        headerEl.textContent = `⚠️ 榜單預覽載入失敗：${err.message}`;
+      }
+    }
+
+    async function startTwoLayerAnalysis() {
+      if (isClientRunning) return;
+
+      const apiKey = document.getElementById("apiKeyInput").value.trim();
+      const provider = document.getElementById("providerSelect").value;
+      const modelName = document.getElementById("modelSelect").value;
+      const topN = parseInt(document.getElementById("topNSelect").value || "20", 10);
+
+      const errBox = document.getElementById("errorAlertBox");
+      errBox.style.display = "none";
+
+      if (!apiKey) {
+        errBox.textContent = "⚠️ 請先在左上方輸入您自備的 LLM API Key (Gemini 或 OpenAI API Key)！";
+        errBox.style.display = "block";
+        document.getElementById("apiKeyInput").focus();
+        return;
+      }
+
+      localStorage.setItem(LS_API_KEY, apiKey);
+
+      isClientRunning = true;
+      clientStopRequested = false;
+      clientLogs = [];
+      document.getElementById("btnStartAnalysis").disabled = true;
+      document.getElementById("btnStopAnalysis").disabled = false;
+
+      const totalUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, calls: 0 };
+      const addUsage = (u) => {
+        if (!u) return;
+        totalUsage.prompt_tokens += Number(u.prompt_tokens || 0);
+        totalUsage.completion_tokens += Number(u.completion_tokens || 0);
+        totalUsage.total_tokens += Number(u.total_tokens || 0);
+        totalUsage.calls += Number(u.calls || 0);
+        document.getElementById("tokenUsagePill").textContent =
+          `Token 消耗：${totalUsage.total_tokens.toLocaleString()} (${totalUsage.calls} 次呼叫)`;
+      };
+
+      try {
+        // Step 1: Layer 1 Market Regime Assessment + Candidate Selection
+        updateProgressBar(0, topN + 1, "第一層：正在擷取 TAIEX 大盤 K 線並進行 AI 氣候診斷...", "running");
+        appendClientLog(`啟動兩層式分析任務（相容 Vercel Serverless 分步執行）｜模型：${modelName}`);
+
+        const step1Res = await fetch("/api/step/layer1", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            api_key: apiKey,
+            provider: provider,
+            model_name: modelName,
+            board_key: currentBoardKey,
+            top_n: topN
+          })
+        });
+        const step1Data = await step1Res.json();
+        if (!step1Res.ok) {
+          throw new Error(step1Data.detail || "第一層大盤診斷失敗");
+        }
+
+        addUsage(step1Data.usage);
+        const regimeAssessment = step1Data.regime_assessment || {};
+        const candidates = step1Data.candidates || [];
+        const boardLabel = step1Data.board_label || "自動選股榜單";
+        const resolvedProvider = step1Data.provider || provider;
+        const resolvedModel = step1Data.model_name || modelName;
+
+        renderLayer1Regime(regimeAssessment, boardLabel, resolvedProvider, resolvedModel, step1Data.timestamp);
+        appendClientLog(
+          `第一層大盤氣候完成：狀態=${regimeAssessment.regime}｜姿態=${regimeAssessment.posture}｜入選 ${candidates.length} 檔標的`
+        );
+
+        const totalSteps = candidates.length + 1;
+        updateProgressBar(1, totalSteps, `第一層完成！準備對【${boardLabel}】共 ${candidates.length} 檔個股進行五維度評分...`, "running");
+
+        // Step 2: Layer 2 Analyst Stock Scoring (Stock by Stock)
+        const completedScores = [];
+
+        for (let i = 0; i < candidates.length; i++) {
+          if (clientStopRequested) {
+            appendClientLog(`偵測到停止執行旗標 (Stop Flag)，於第 ${i + 1} 檔前安全終止。`, "WARNING");
+            break;
+          }
+
+          const cand = candidates[i];
+          const code = cand.stock_code;
+          const name = cand.stock_name || code;
+
+          updateProgressBar(
+            i + 1,
+            totalSteps,
+            `第二層：正在評分 (${i + 1}/${candidates.length}) ${code} ${name}...`,
+            "running"
+          );
+          appendClientLog(`第二層個股分析 (${i + 1}/${candidates.length})：正在評估 ${code} (${name}) 五維度技術指標...`);
+
+          const step2Res = await fetch("/api/step/layer2-stock", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              api_key: apiKey,
+              provider: resolvedProvider,
+              model_name: resolvedModel,
+              stock_code: code,
+              candidate_meta: cand,
+              regime_assessment: regimeAssessment
+            })
+          });
+          const step2Data = await step2Res.json();
+          if (!step2Res.ok) {
+            if (step2Res.status === 401) {
+              throw new Error(step2Data.detail || "API Key 驗證或額度錯誤");
+            }
+            appendClientLog(`評估 ${code} 發生異常：${step2Data.detail || "未知錯誤"}，略過該檔。`, "WARNING");
+            continue;
+          }
+
+          addUsage(step2Data.usage);
+          if (step2Data.score) {
+            completedScores.push(step2Data.score);
+            // 即時排序並更新表格
+            completedScores.sort((a, b) => (b.total_score - a.total_score) || (b.confidence - a.confidence));
+            completedScores.forEach((item, idx) => { item.rank = idx + 1; });
+            renderLayer2ScoresTable(completedScores, boardLabel);
+            appendClientLog(`✔ ${code} (${name}) 評分完成：總分 ${step2Data.score.total_score} / 100 分`);
+          }
+        }
+
+        // Step 3: Build Final Markdown Report
+        const mdRes = await fetch("/api/step/markdown", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            board_key: currentBoardKey,
+            board_label: boardLabel,
+            provider: resolvedProvider,
+            model_name: resolvedModel,
+            stopped_early: clientStopRequested,
+            usage: totalUsage,
+            regime_assessment: regimeAssessment,
+            candidates: candidates,
+            analyst_scores: completedScores
+          })
+        });
+        const finalReport = await mdRes.json();
+        if (mdRes.ok) {
+          renderReport(finalReport);
+        }
+
+        if (clientStopRequested) {
+          updateProgressBar(
+            completedScores.length + 1,
+            totalSteps,
+            `已依指令提前終止（已完成 ${completedScores.length} 檔五維度評分，可下載 .md 報告）`,
+            "completed"
+          );
+        } else {
+          updateProgressBar(
+            totalSteps,
+            totalSteps,
+            `兩層式分析完成！共完成 ${completedScores.length} 檔五維度評分，可一鍵下載 .md 報告`,
+            "completed"
+          );
+          appendClientLog(`🎉 兩層式選股分析全部完成！共產出 ${completedScores.length} 檔量化評分與 Markdown 報告。`);
+        }
+      } catch (err) {
+        errBox.textContent = `❌ 分析中斷：${err.message}`;
+        errBox.style.display = "block";
+        updateProgressBar(0, 1, `分析發生錯誤：${err.message}`, "error");
+        appendClientLog(`分析錯誤：${err.message}`, "ERROR");
+      } finally {
+        isClientRunning = false;
+        clientStopRequested = false;
+        document.getElementById("btnStartAnalysis").disabled = false;
+        document.getElementById("btnStopAnalysis").disabled = true;
+      }
+    }
+
+    async function stopAnalysis() {
+      clientStopRequested = true;
+      document.getElementById("btnStopAnalysis").disabled = true;
+      appendClientLog("已收到停止請求 (stop_requested=True)，將於當前個股完成後安全終止...", "WARNING");
+      try {
+        await fetch("/api/analyze/stop", { method: "POST" });
+      } catch (_) {}
+    }
+
+    function renderLayer1Regime(reg, boardLabel, provider, modelName, createdAt) {
+      document.getElementById("activeBoardPill").textContent = boardLabel || "自動選股榜單";
+      document.getElementById("regimeTimestamp").textContent =
+        `報告時間：${createdAt || nowTwStr()}｜模型：${(provider || "").toUpperCase()} / ${modelName || ""}`;
+
+      const taiexClose = Number(reg.taiex_close || 0);
+      document.getElementById("regTaiexClose").textContent =
+        taiexClose > 0 ? `${taiexClose.toLocaleString("en-US", { minimumFractionDigits: 2 })} 點 (${reg.taiex_date || ""})` : "--";
+      document.getElementById("regState").textContent = REGIME_LABELS[reg.regime] || reg.regime || "--";
+      document.getElementById("regPosture").textContent = POSTURE_LABELS[reg.posture] || reg.posture || "--";
+      document.getElementById("regCashRatio").textContent =
+        reg.target_cash_ratio !== undefined ? `${Math.round(Number(reg.target_cash_ratio) * 100)}%` : "--";
+      document.getElementById("regRiskMult").textContent =
+        reg.risk_multiplier !== undefined ? Number(reg.risk_multiplier).toFixed(2) : "--";
+      document.getElementById("regAllowedStyles").textContent =
+        Array.isArray(reg.allowed_buy_styles) ? reg.allowed_buy_styles.join(", ") : "--";
+      document.getElementById("regDirectiveText").textContent = reg.tactical_directive || "--";
+      document.getElementById("regReasonText").textContent = reg.reason || "--";
+    }
+
+    function renderLayer2ScoresTable(scores, defaultBoardLabel) {
+      const tbody = document.getElementById("analystScoresTbody");
+      if (!scores || scores.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding: 28px; color: var(--text-secondary);">本輪無個股評分資料。</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = scores.map((s) => {
+        const rk = Number(s.rank || 0);
+        const rkClass = rk <= 3 ? `rank-badge rank-${rk}` : "rank-badge";
+        const tot = Number(s.total_score || 0);
+        const totClass = tot >= 75 ? "total-score-pill score-high" : (tot >= 60 ? "total-score-pill score-mid" : "total-score-pill score-low");
+
+        const chg = Number(s.change_pct || 0);
+        const chgClass = chg > 0 ? "up-text" : (chg < 0 ? "down-text" : "");
+        const chgStr = chg > 0 ? `+${chg.toFixed(2)}%` : `${chg.toFixed(2)}%`;
+        const tvYi = (Number(s.turnover || 0) / 1e8).toFixed(2);
+
+        return `
+          <tr>
+            <td><span class="${rkClass}">${rk}</span></td>
+            <td>
+              <div style="font-weight: 700; color: #fff; font-size: 0.95rem;">${escapeHtml(s.stock_code)} ${escapeHtml(s.stock_name || "")}</div>
+              <div style="font-size: 0.74rem; color: var(--text-secondary);">${escapeHtml(s.board_label || defaultBoardLabel || "")}｜${escapeHtml(s.latest_date || "")}</div>
+            </td>
+            <td style="font-weight: 700;">${Number(s.price || 0).toFixed(2)} 元</td>
+            <td class="${chgClass}">${chgStr}</td>
+            <td>${tvYi} 億</td>
+            <td>
+              <span class="${totClass}">${tot} 分</span>
+              <div style="font-size: 0.72rem; color: var(--text-secondary); margin-top: 4px;">信心 ${Math.round(Number(s.confidence || 0) * 100)}%</div>
+            </td>
+            <td>
+              <div class="dim-grid">
+                <span class="dim-chip">趨勢 <strong>${s.trend_score}/20</strong></span>
+                <span class="dim-chip">動能 <strong>${s.momentum_score}/20</strong></span>
+                <span class="dim-chip">量能 <strong>${s.volume_score}/20</strong></span>
+                <span class="dim-chip">安全 <strong>${s.safety_score}/20</strong></span>
+                <span class="dim-chip">大盤 <strong>${s.regime_score}/20</strong></span>
+              </div>
+            </td>
+            <td style="font-size: 0.78rem; color: var(--text-secondary); white-space: nowrap;">
+              <div>MA5: ${s.ma5 ?? "N/A"} | MA20: ${s.ma20 ?? "N/A"}</div>
+              <div>MA60: ${s.ma60 ?? "N/A"} | RSI: ${s.rsi14 ?? "N/A"}</div>
+              <div>ATR波動: ${Number(s.atr_pct || 0).toFixed(2)}% (${s.volatility_tier || "NORMAL"})</div>
+            </td>
+            <td style="max-width: 360px; font-size: 0.84rem; color: #e2e8f0; line-height: 1.5;">
+              ${escapeHtml(s.reason || "")}
+            </td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    function renderReport(report) {
+      latestReportId = report.report_id || "latest";
+      latestMarkdownContent = report.markdown_content || "";
+
+      const hasReport = Boolean(latestMarkdownContent);
+      document.getElementById("btnDownloadMdTop").disabled = !hasReport;
+      document.getElementById("btnDownloadMdMain").disabled = !hasReport;
+      document.getElementById("btnDownloadMdBottom").disabled = !hasReport;
+      document.getElementById("btnCopyMd").disabled = !hasReport;
+
+      renderLayer1Regime(
+        report.regime_assessment || {},
+        report.board_label,
+        report.provider,
+        report.model_name,
+        report.created_at
+      );
+      renderLayer2ScoresTable(report.analyst_scores || [], report.board_label);
+
+      if (latestMarkdownContent) {
+        document.getElementById("markdownPreviewBox").textContent = latestMarkdownContent;
+      }
+    }
+
+    function downloadMarkdownReport() {
+      if (latestMarkdownContent) {
+        const blob = new Blob([latestMarkdownContent], { type: "text/markdown;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `AIAdviseStocks_${currentBoardKey}_${latestReportId || "report"}.md`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        return;
+      }
+      window.location.href = "/api/report/markdown";
+    }
+
+    async function copyMarkdownToClipboard() {
+      if (!latestMarkdownContent) return;
+      try {
+        await navigator.clipboard.writeText(latestMarkdownContent);
+        const btn = document.getElementById("btnCopyMd");
+        const oldText = btn.textContent;
+        btn.textContent = "✅ 已複製！";
+        setTimeout(() => { btn.textContent = oldText; }, 1800);
+      } catch (err) {
+        alert("複製失敗，請直接點擊「下載 .md 檔案」按鈕。");
+      }
+    }
+
+    function escapeHtml(str) {
+      return String(str || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+  </script>
+</body>
+</html>
