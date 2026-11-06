@@ -541,24 +541,74 @@
     .score-mid { background: rgba(56, 189, 248, 0.16); color: #7dd3fc; border: 1px solid rgba(56, 189, 248, 0.35); }
     .score-low { background: rgba(148, 163, 184, 0.15); color: #cbd5e1; border: 1px solid rgba(148, 163, 184, 0.3); }
 
-    .dim-grid {
+    .dim-bars {
       display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-      min-width: 230px;
+      flex-direction: column;
+      gap: 5px;
+      min-width: 210px;
+      max-width: 250px;
     }
 
-    .dim-chip {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border-color);
-      border-radius: 6px;
-      padding: 3px 7px;
+    .dim-bar-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
       font-size: 0.75rem;
-      white-space: nowrap;
+      line-height: 1.1;
     }
 
-    .dim-chip strong {
-      color: var(--accent-blue);
+    .dim-bar-label {
+      width: 30px;
+      color: var(--text-secondary);
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+
+    .dim-bar-track {
+      flex: 1;
+      height: 8px;
+      background: rgba(15, 23, 42, 0.9);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+
+    .dim-bar-fill {
+      height: 100%;
+      border-radius: 999px;
+      transition: width 0.35s ease;
+    }
+
+    .dim-fill-high {
+      background: linear-gradient(90deg, #059669, #34d399);
+    }
+
+    .dim-fill-mid {
+      background: linear-gradient(90deg, #0284c7, #38bdf8);
+    }
+
+    .dim-fill-warn {
+      background: linear-gradient(90deg, #d97706, #fbbf24);
+    }
+
+    .dim-fill-low {
+      background: linear-gradient(90deg, #be123c, #fb7185);
+    }
+
+    .dim-bar-val {
+      width: 42px;
+      text-align: right;
+      font-family: "Consolas", "Monaco", monospace;
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: #f8fafc;
+      flex-shrink: 0;
+    }
+
+    .dim-bar-val span {
+      color: var(--text-secondary);
+      font-weight: 400;
+      font-size: 0.68rem;
     }
 
     .up-text { color: var(--tw-up); font-weight: 700; }
@@ -1362,6 +1412,28 @@
       document.getElementById("regReasonText").textContent = reg.reason || "--";
     }
 
+    function renderDimBarRow(label, rawScore) {
+      const val = Math.max(0, Math.min(20, Number(rawScore || 0)));
+      const pct = Math.round((val / 20) * 100);
+      let fillClass = "dim-fill-low";
+      if (val >= 15) {
+        fillClass = "dim-fill-high";
+      } else if (val >= 10) {
+        fillClass = "dim-fill-mid";
+      } else if (val >= 6) {
+        fillClass = "dim-fill-warn";
+      }
+      return `
+        <div class="dim-bar-row">
+          <span class="dim-bar-label">${label}</span>
+          <div class="dim-bar-track">
+            <div class="dim-bar-fill ${fillClass}" style="width: ${pct}%;"></div>
+          </div>
+          <span class="dim-bar-val">${val}<span>/20</span></span>
+        </div>
+      `;
+    }
+
     function renderLayer2ScoresTable(scores, defaultBoardLabel) {
       const tbody = document.getElementById("analystScoresTbody");
       if (!scores || scores.length === 0) {
@@ -1395,12 +1467,12 @@
               <div style="font-size: 0.72rem; color: var(--text-secondary); margin-top: 4px;">信心 ${Math.round(Number(s.confidence || 0) * 100)}%</div>
             </td>
             <td>
-              <div class="dim-grid">
-                <span class="dim-chip">趨勢 <strong>${s.trend_score}/20</strong></span>
-                <span class="dim-chip">動能 <strong>${s.momentum_score}/20</strong></span>
-                <span class="dim-chip">量能 <strong>${s.volume_score}/20</strong></span>
-                <span class="dim-chip">安全 <strong>${s.safety_score}/20</strong></span>
-                <span class="dim-chip">大盤 <strong>${s.regime_score}/20</strong></span>
+              <div class="dim-bars">
+                ${renderDimBarRow("趨勢", s.trend_score)}
+                ${renderDimBarRow("動能", s.momentum_score)}
+                ${renderDimBarRow("量能", s.volume_score)}
+                ${renderDimBarRow("安全", s.safety_score)}
+                ${renderDimBarRow("大盤", s.regime_score)}
               </div>
             </td>
             <td style="font-size: 0.78rem; color: var(--text-secondary); white-space: nowrap;">
