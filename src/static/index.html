@@ -537,9 +537,10 @@
       font-size: 0.98rem;
     }
 
-    .score-high { background: rgba(239, 68, 68, 0.18); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.4); }
-    .score-mid { background: rgba(56, 189, 248, 0.16); color: #7dd3fc; border: 1px solid rgba(56, 189, 248, 0.35); }
-    .score-low { background: rgba(148, 163, 184, 0.15); color: #cbd5e1; border: 1px solid rgba(148, 163, 184, 0.3); }
+    .score-high { background: rgba(16, 185, 129, 0.18); color: #34d399; border: 1px solid rgba(52, 211, 153, 0.45); }
+    .score-mid { background: rgba(56, 189, 248, 0.18); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.45); }
+    .score-warn { background: rgba(245, 158, 11, 0.18); color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.45); }
+    .score-low { background: rgba(244, 63, 94, 0.18); color: #fb7185; border: 1px solid rgba(251, 113, 133, 0.45); }
 
     .dim-bars {
       display: flex;
@@ -604,6 +605,11 @@
       color: #f8fafc;
       flex-shrink: 0;
     }
+
+    .dim-val-high { color: #34d399; }
+    .dim-val-mid { color: #38bdf8; }
+    .dim-val-warn { color: #fbbf24; }
+    .dim-val-low { color: #fb7185; }
 
     .dim-bar-val span {
       color: var(--text-secondary);
@@ -1513,12 +1519,16 @@
       const val = Math.max(0, Math.min(20, Number(rawScore || 0)));
       const pct = Math.round((val / 20) * 100);
       let fillClass = "dim-fill-low";
+      let valClass = "dim-val-low";
       if (val >= 15) {
         fillClass = "dim-fill-high";
+        valClass = "dim-val-high";
       } else if (val >= 10) {
         fillClass = "dim-fill-mid";
+        valClass = "dim-val-mid";
       } else if (val >= 6) {
         fillClass = "dim-fill-warn";
+        valClass = "dim-val-warn";
       }
       return `
         <div class="dim-bar-row">
@@ -1526,7 +1536,7 @@
           <div class="dim-bar-track">
             <div class="dim-bar-fill ${fillClass}" style="width: ${pct}%;"></div>
           </div>
-          <span class="dim-bar-val">${val}<span>/20</span></span>
+          <span class="dim-bar-val ${valClass}">${val}<span>/20</span></span>
         </div>
       `;
     }
@@ -1542,7 +1552,14 @@
         const rk = Number(s.rank || 0);
         const rkClass = rk <= 3 ? `rank-badge rank-${rk}` : "rank-badge";
         const tot = Number(s.total_score || 0);
-        const totClass = tot >= 75 ? "total-score-pill score-high" : (tot >= 60 ? "total-score-pill score-mid" : "total-score-pill score-low");
+        let totClass = "total-score-pill score-low";
+        if (tot >= 75) {
+          totClass = "total-score-pill score-high";
+        } else if (tot >= 50) {
+          totClass = "total-score-pill score-mid";
+        } else if (tot >= 30) {
+          totClass = "total-score-pill score-warn";
+        }
 
         const chg = Number(s.change_pct || 0);
         const chgClass = chg > 0 ? "up-text" : (chg < 0 ? "down-text" : "");
