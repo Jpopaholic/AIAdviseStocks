@@ -135,8 +135,10 @@
 
     .card-header {
       display: flex;
+      flex-wrap: wrap;
       justify-content: space-between;
       align-items: center;
+      gap: 10px;
       margin-bottom: 14px;
       padding-bottom: 10px;
       border-bottom: 1px solid rgba(255, 255, 255, 0.07);
@@ -195,6 +197,7 @@
 
     input[type="text"],
     input[type="password"],
+    input[type="date"],
     select {
       width: 100%;
       padding: 10px 12px;
@@ -205,11 +208,28 @@
       font-size: 0.9rem;
       outline: none;
       transition: border-color 0.2s;
+      color-scheme: dark;
     }
 
     input:focus,
     select:focus {
       border-color: var(--accent-blue);
+    }
+
+    /* Date Warning Alert Banner */
+    .date-warning-banner {
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      background: rgba(245, 158, 11, 0.16);
+      border: 1px solid rgba(245, 158, 11, 0.55);
+      color: #fde68a;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 0.84rem;
+      font-weight: 600;
+      margin-bottom: 14px;
     }
 
     /* Three Leaderboards Cards */
@@ -618,10 +638,11 @@
         <span class="brand-badge">AIAdviseStocks</span>
         <div>
           <h1>台股兩層式 AI 選股與五維度量化分析系統</h1>
-          <div class="brand-subtitle">保留第一層大盤氣候診斷 + 第二層個股五維度技術評分｜三大榜單自動選股｜BYOK 自備金鑰｜純 Web 與 Markdown 報告下載</div>
+          <div class="brand-subtitle">保留第一層大盤氣候診斷 + 第二層個股五維度技術評分｜三大榜單自動選股｜指定日期自動對齊最近開盤日｜純 Web 與 Markdown 下載</div>
         </div>
       </div>
       <div class="header-badges">
+        <span class="pill" id="effectiveDatePill">📅 基準開盤日：載入中...</span>
         <span class="pill" id="tokenUsagePill">Token 消耗：0</span>
         <button class="btn btn-emerald" id="btnDownloadMdTop" onclick="downloadMarkdownReport()" disabled>
           📥 下載 Markdown (.md) 報告
@@ -629,7 +650,7 @@
       </div>
     </header>
 
-    <!-- Control Grid: BYOK Key + 3 Leaderboards -->
+    <!-- Control Grid: BYOK Key + 3 Leaderboards & Date Picker -->
     <div class="control-grid">
       <!-- Left: BYOK LLM API Key Settings -->
       <section class="card">
@@ -670,19 +691,52 @@
         </div>
       </section>
 
-      <!-- Right: Three Auto-Selection Leaderboards -->
+      <!-- Right: Three Auto-Selection Leaderboards + Target Date -->
       <section class="card">
         <div class="card-header">
-          <div class="card-title">🏆 三大自動選股榜單模式 (Auto-Selection Leaderboards)</div>
-          <div style="display: flex; align-items: center; gap: 8px;">
-            <label for="topNSelect" style="font-size: 0.8rem; color: var(--text-secondary);">挑選檔數：</label>
-            <select id="topNSelect" style="width: 95px; padding: 6px 8px;" onchange="previewSelectedBoard(false)">
-              <option value="5">Top 5 檔</option>
-              <option value="10">Top 10 檔</option>
-              <option value="15">Top 15 檔</option>
-              <option value="20" selected>Top 20 檔</option>
-            </select>
+          <div class="card-title">🏆 三大自動選股榜單與分析基準日期</div>
+          <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px;">
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <label for="targetDateInput" style="font-size: 0.8rem; color: var(--text-secondary); white-space: nowrap;">📅 分析日期：</label>
+              <input
+                type="date"
+                id="targetDateInput"
+                style="width: 148px; padding: 6px 10px; font-size: 0.84rem;"
+                onchange="onTargetDateChange(true)"
+              />
+              <button
+                class="btn btn-secondary"
+                type="button"
+                style="padding: 6px 10px; font-size: 0.76rem;"
+                onclick="resetToLatestTradingDate()"
+                title="切換為最近一個有效開盤交易日"
+              >
+                最新開盤
+              </button>
+            </div>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <label for="topNSelect" style="font-size: 0.8rem; color: var(--text-secondary); white-space: nowrap;">挑選檔數：</label>
+              <select id="topNSelect" style="width: 95px; padding: 6px 8px; font-size: 0.84rem;" onchange="previewSelectedBoard(false, false)">
+                <option value="5">Top 5 檔</option>
+                <option value="10">Top 10 檔</option>
+                <option value="15">Top 15 檔</option>
+                <option value="20" selected>Top 20 檔</option>
+              </select>
+            </div>
           </div>
+        </div>
+
+        <!-- Non-Trading Day Auto-Adjustment Warning Banner -->
+        <div class="date-warning-banner" id="dateWarningBanner">
+          <span id="dateWarningText"></span>
+          <button
+            class="btn btn-secondary"
+            type="button"
+            style="padding: 4px 10px; font-size: 0.75rem;"
+            onclick="document.getElementById('dateWarningBanner').style.display='none'"
+          >
+            知道了
+          </button>
         </div>
 
         <div class="boards-grid" id="boardsContainer">
@@ -710,7 +764,7 @@
           <button class="btn btn-danger" id="btnStopAnalysis" onclick="stopAnalysis()" disabled>
             🛑 停止執行 (Stop Flag)
           </button>
-          <button class="btn btn-secondary" id="btnPreviewBoard" onclick="previewSelectedBoard(true)">
+          <button class="btn btn-secondary" id="btnPreviewBoard" onclick="previewSelectedBoard(true, true)">
             🔄 重新整理榜單預覽
           </button>
           <button class="btn btn-emerald" id="btnDownloadMdMain" onclick="downloadMarkdownReport()" disabled>
@@ -732,7 +786,7 @@
       <div class="status-top">
         <div class="phase-indicator">
           <span class="pulse-dot" id="statusDot"></span>
-          <span id="phaseLabelText">系統待命準備中 — 請輸入 API Key 並選擇榜單後點擊「啟動兩層式 AI 選股分析」</span>
+          <span id="phaseLabelText">系統待命準備中 — 請輸入 API Key、選擇分析日期與榜單後點擊「啟動兩層式 AI 選股分析」</span>
         </div>
         <div style="font-size: 0.84rem; color: var(--text-secondary);" id="progressStepText">
           進度：0 / 0
@@ -809,7 +863,7 @@
             <tr>
               <th>排名</th>
               <th>股票代號 / 名稱</th>
-              <th>最新收盤價</th>
+              <th>收盤價</th>
               <th>漲跌幅</th>
               <th>成交金額</th>
               <th>量化總分 (100)</th>
@@ -863,12 +917,14 @@
     const LS_PROVIDER = "ai_advise_stocks_provider";
     const LS_MODEL = "ai_advise_stocks_model";
     const LS_BOARD = "ai_advise_stocks_board";
+    const LS_TARGET_DATE = "ai_advise_stocks_target_date";
 
     let currentBoardKey = "core_top20";
     let isClientRunning = false;
     let clientStopRequested = false;
     let latestReportId = null;
     let latestMarkdownContent = "";
+    let latestTradingDateFromServer = "";
     let clientLogs = [];
 
     const REGIME_LABELS = {
@@ -888,15 +944,22 @@
       STRICT_DEFENSE: "🔒 極度保守 (STRICT_DEFENSE)"
     };
 
-    window.addEventListener("DOMContentLoaded", () => {
+    function getTodayTwDateStr() {
+      const d = new Date();
+      return d.toLocaleDateString("sv-SE", { timeZone: "Asia/Taipei" });
+    }
+
+    window.addEventListener("DOMContentLoaded", async () => {
       const savedKey = localStorage.getItem(LS_API_KEY) || "";
       const savedProvider = localStorage.getItem(LS_PROVIDER) || "auto";
       const savedModel = localStorage.getItem(LS_MODEL) || "gemini-2.5-flash";
       const savedBoard = localStorage.getItem(LS_BOARD) || "core_top20";
+      const savedDate = localStorage.getItem(LS_TARGET_DATE) || getTodayTwDateStr();
 
       document.getElementById("apiKeyInput").value = savedKey;
       document.getElementById("providerSelect").value = savedProvider;
       document.getElementById("modelSelect").value = savedModel;
+      document.getElementById("targetDateInput").value = savedDate;
 
       document.getElementById("apiKeyInput").addEventListener("input", (e) => {
         localStorage.setItem(LS_API_KEY, e.target.value.trim());
@@ -927,6 +990,41 @@
         return `<div class="${cls}">${escapeHtml(l)}</div>`;
       }).join("");
       logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function showDateAdjustedWarning(warningMsg, requestedDate, effectiveDate, showPopupAlert = true) {
+      const dateInput = document.getElementById("targetDateInput");
+      if (effectiveDate) {
+        dateInput.value = effectiveDate;
+        localStorage.setItem(LS_TARGET_DATE, effectiveDate);
+        document.getElementById("effectiveDatePill").textContent = `📅 基準開盤日：${effectiveDate}`;
+      }
+      if (warningMsg) {
+        const banner = document.getElementById("dateWarningBanner");
+        const textEl = document.getElementById("dateWarningText");
+        textEl.textContent = warningMsg;
+        banner.style.display = "flex";
+        appendClientLog(warningMsg, "WARNING");
+        if (showPopupAlert) {
+          alert(warningMsg);
+        }
+      }
+    }
+
+    async function onTargetDateChange(showPopupAlert = true) {
+      const pickedDate = document.getElementById("targetDateInput").value;
+      if (pickedDate) {
+        localStorage.setItem(LS_TARGET_DATE, pickedDate);
+      }
+      await previewSelectedBoard(false, showPopupAlert);
+    }
+
+    async function resetToLatestTradingDate() {
+      document.getElementById("dateWarningBanner").style.display = "none";
+      const target = latestTradingDateFromServer || getTodayTwDateStr();
+      document.getElementById("targetDateInput").value = target;
+      localStorage.setItem(LS_TARGET_DATE, target);
+      await previewSelectedBoard(false, false);
     }
 
     function updateProgressBar(cur, tot, phaseLabel, dotState = "running") {
@@ -969,21 +1067,51 @@
       document.querySelectorAll(".board-card").forEach((card) => {
         card.classList.toggle("active", card.getAttribute("data-board") === boardKey);
       });
-      previewSelectedBoard(false);
+      previewSelectedBoard(false, false);
     }
 
-    async function previewSelectedBoard(forceRefresh = false) {
+    async function previewSelectedBoard(forceRefresh = false, showPopupAlertOnDateAdjust = false) {
       const topN = document.getElementById("topNSelect").value || 20;
+      const targetDate = document.getElementById("targetDateInput").value || "";
       const headerEl = document.getElementById("previewHeaderLabel");
       const chipsEl = document.getElementById("candidatePreviewChips");
-      headerEl.textContent = "📋 正在載入榜單預覽標的...";
+      headerEl.textContent = "📋 正在載入榜單預覽標的與檢查開盤日期...";
 
       try {
-        const res = await fetch(`/api/boards/${currentBoardKey}/preview?top_n=${topN}&refresh=${forceRefresh}`);
+        const qs = new URLSearchParams({
+          top_n: String(topN),
+          refresh: String(forceRefresh)
+        });
+        if (targetDate) {
+          qs.set("target_date", targetDate);
+        }
+        const res = await fetch(`/api/boards/${currentBoardKey}/preview?${qs.toString()}`);
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || "預覽失敗");
 
-        headerEl.textContent = `📋 【${data.board_name}】預覽入選標的（共 ${data.count} 檔，更新於 ${data.updated_at}）：`;
+        if (data.available_max_date) {
+          latestTradingDateFromServer = data.available_max_date;
+        }
+        if (data.effective_date) {
+          document.getElementById("effectiveDatePill").textContent = `📅 基準開盤日：${data.effective_date}`;
+        }
+
+        // 若選擇該日期沒有開盤，自動切換為離該日期最近的開盤日並跳出警告
+        if (data.date_adjusted && data.date_warning) {
+          showDateAdjustedWarning(
+            data.date_warning,
+            data.requested_date,
+            data.effective_date,
+            showPopupAlertOnDateAdjust
+          );
+        } else {
+          document.getElementById("dateWarningBanner").style.display = "none";
+          if (data.effective_date) {
+            document.getElementById("targetDateInput").value = data.effective_date;
+          }
+        }
+
+        headerEl.textContent = `📋 【${data.board_name}】基準開盤日 ${data.effective_date} 入選標的（共 ${data.count} 檔）：`;
         chipsEl.innerHTML = (data.candidates || []).map((c, idx) => {
           const chg = Number(c.change_pct || 0);
           const chgClass = chg > 0 ? "up-text" : (chg < 0 ? "down-text" : "");
@@ -1003,6 +1131,7 @@
       const provider = document.getElementById("providerSelect").value;
       const modelName = document.getElementById("modelSelect").value;
       const topN = parseInt(document.getElementById("topNSelect").value || "20", 10);
+      const requestedDate = document.getElementById("targetDateInput").value || getTodayTwDateStr();
 
       const errBox = document.getElementById("errorAlertBox");
       errBox.style.display = "none";
@@ -1015,6 +1144,7 @@
       }
 
       localStorage.setItem(LS_API_KEY, apiKey);
+      localStorage.setItem(LS_TARGET_DATE, requestedDate);
 
       isClientRunning = true;
       clientStopRequested = false;
@@ -1034,9 +1164,9 @@
       };
 
       try {
-        // Step 1: Layer 1 Market Regime Assessment + Candidate Selection
-        updateProgressBar(0, topN + 1, "第一層：正在擷取 TAIEX 大盤 K 線並進行 AI 氣候診斷...", "running");
-        appendClientLog(`啟動兩層式分析任務（相容 Vercel Serverless 分步執行）｜模型：${modelName}`);
+        // Step 1: Layer 1 Market Regime Assessment + Trading Date Resolution + Candidate Selection
+        updateProgressBar(0, topN + 1, `第一層：正在檢查開盤日 (${requestedDate}) 並進行 TAIEX 大盤氣候診斷...`, "running");
+        appendClientLog(`啟動兩層式分析任務｜選擇日期：${requestedDate}｜模型：${modelName}`);
 
         const step1Res = await fetch("/api/step/layer1", {
           method: "POST",
@@ -1046,12 +1176,21 @@
             provider: provider,
             model_name: modelName,
             board_key: currentBoardKey,
-            top_n: topN
+            top_n: topN,
+            target_date: requestedDate
           })
         });
         const step1Data = await step1Res.json();
         if (!step1Res.ok) {
           throw new Error(step1Data.detail || "第一層大盤診斷失敗");
+        }
+
+        // 若所選日期沒有開盤，自動切換至最近開盤日並跳出警告
+        const effectiveDate = step1Data.effective_date || requestedDate;
+        if (step1Data.date_adjusted && step1Data.date_warning) {
+          showDateAdjustedWarning(step1Data.date_warning, step1Data.requested_date, effectiveDate, true);
+        } else {
+          document.getElementById("effectiveDatePill").textContent = `📅 基準開盤日：${effectiveDate}`;
         }
 
         addUsage(step1Data.usage);
@@ -1061,13 +1200,13 @@
         const resolvedProvider = step1Data.provider || provider;
         const resolvedModel = step1Data.model_name || modelName;
 
-        renderLayer1Regime(regimeAssessment, boardLabel, resolvedProvider, resolvedModel, step1Data.timestamp);
+        renderLayer1Regime(regimeAssessment, boardLabel, resolvedProvider, resolvedModel, step1Data.timestamp, effectiveDate);
         appendClientLog(
-          `第一層大盤氣候完成：狀態=${regimeAssessment.regime}｜姿態=${regimeAssessment.posture}｜入選 ${candidates.length} 檔標的`
+          `第一層大盤氣候完成 (基準日 ${effectiveDate})：狀態=${regimeAssessment.regime}｜姿態=${regimeAssessment.posture}｜入選 ${candidates.length} 檔標的`
         );
 
         const totalSteps = candidates.length + 1;
-        updateProgressBar(1, totalSteps, `第一層完成！準備對【${boardLabel}】共 ${candidates.length} 檔個股進行五維度評分...`, "running");
+        updateProgressBar(1, totalSteps, `第一層完成！準備對【${boardLabel}】(${effectiveDate}) 共 ${candidates.length} 檔個股進行五維度評分...`, "running");
 
         // Step 2: Layer 2 Analyst Stock Scoring (Stock by Stock)
         const completedScores = [];
@@ -1085,10 +1224,10 @@
           updateProgressBar(
             i + 1,
             totalSteps,
-            `第二層：正在評分 (${i + 1}/${candidates.length}) ${code} ${name}...`,
+            `第二層：正在評分 (${i + 1}/${candidates.length}) ${code} ${name} (基準日 ${effectiveDate})...`,
             "running"
           );
-          appendClientLog(`第二層個股分析 (${i + 1}/${candidates.length})：正在評估 ${code} (${name}) 五維度技術指標...`);
+          appendClientLog(`第二層個股分析 (${i + 1}/${candidates.length})：正在評估 ${code} (${name}) 截至 ${effectiveDate} 之五維度技術指標...`);
 
           const step2Res = await fetch("/api/step/layer2-stock", {
             method: "POST",
@@ -1098,6 +1237,7 @@
               provider: resolvedProvider,
               model_name: resolvedModel,
               stock_code: code,
+              target_date: effectiveDate,
               candidate_meta: cand,
               regime_assessment: regimeAssessment
             })
@@ -1114,7 +1254,6 @@
           addUsage(step2Data.usage);
           if (step2Data.score) {
             completedScores.push(step2Data.score);
-            // 即時排序並更新表格
             completedScores.sort((a, b) => (b.total_score - a.total_score) || (b.confidence - a.confidence));
             completedScores.forEach((item, idx) => { item.rank = idx + 1; });
             renderLayer2ScoresTable(completedScores, boardLabel);
@@ -1129,6 +1268,10 @@
           body: JSON.stringify({
             board_key: currentBoardKey,
             board_label: boardLabel,
+            requested_date: requestedDate,
+            effective_date: effectiveDate,
+            date_adjusted: Boolean(step1Data.date_adjusted),
+            date_warning: step1Data.date_warning || null,
             provider: resolvedProvider,
             model_name: resolvedModel,
             stopped_early: clientStopRequested,
@@ -1147,17 +1290,17 @@
           updateProgressBar(
             completedScores.length + 1,
             totalSteps,
-            `已依指令提前終止（已完成 ${completedScores.length} 檔五維度評分，可下載 .md 報告）`,
+            `已依指令提前終止（基準日 ${effectiveDate}，已完成 ${completedScores.length} 檔五維度評分，可下載 .md 報告）`,
             "completed"
           );
         } else {
           updateProgressBar(
             totalSteps,
             totalSteps,
-            `兩層式分析完成！共完成 ${completedScores.length} 檔五維度評分，可一鍵下載 .md 報告`,
+            `兩層式分析完成！（基準日 ${effectiveDate}，共完成 ${completedScores.length} 檔五維度評分，可一鍵下載 .md 報告）`,
             "completed"
           );
-          appendClientLog(`🎉 兩層式選股分析全部完成！共產出 ${completedScores.length} 檔量化評分與 Markdown 報告。`);
+          appendClientLog(`🎉 兩層式選股分析全部完成！基準開盤日：${effectiveDate}，共產出 ${completedScores.length} 檔量化評分與 Markdown 報告。`);
         }
       } catch (err) {
         errBox.textContent = `❌ 分析中斷：${err.message}`;
@@ -1181,14 +1324,15 @@
       } catch (_) {}
     }
 
-    function renderLayer1Regime(reg, boardLabel, provider, modelName, createdAt) {
-      document.getElementById("activeBoardPill").textContent = boardLabel || "自動選股榜單";
+    function renderLayer1Regime(reg, boardLabel, provider, modelName, createdAt, effectiveDate) {
+      document.getElementById("activeBoardPill").textContent =
+        effectiveDate ? `${boardLabel || "自動選股榜單"} (${effectiveDate})` : (boardLabel || "自動選股榜單");
       document.getElementById("regimeTimestamp").textContent =
-        `報告時間：${createdAt || nowTwStr()}｜模型：${(provider || "").toUpperCase()} / ${modelName || ""}`;
+        `基準開盤日：${effectiveDate || reg.taiex_date || ""}｜報告時間：${createdAt || nowTwStr()}｜模型：${(provider || "").toUpperCase()} / ${modelName || ""}`;
 
       const taiexClose = Number(reg.taiex_close || 0);
       document.getElementById("regTaiexClose").textContent =
-        taiexClose > 0 ? `${taiexClose.toLocaleString("en-US", { minimumFractionDigits: 2 })} 點 (${reg.taiex_date || ""})` : "--";
+        taiexClose > 0 ? `${taiexClose.toLocaleString("en-US", { minimumFractionDigits: 2 })} 點 (${reg.taiex_date || effectiveDate || ""})` : "--";
       document.getElementById("regState").textContent = REGIME_LABELS[reg.regime] || reg.regime || "--";
       document.getElementById("regPosture").textContent = POSTURE_LABELS[reg.posture] || reg.posture || "--";
       document.getElementById("regCashRatio").textContent =
@@ -1270,7 +1414,8 @@
         report.board_label,
         report.provider,
         report.model_name,
-        report.created_at
+        report.created_at,
+        report.effective_date
       );
       renderLayer2ScoresTable(report.analyst_scores || [], report.board_label);
 
@@ -1281,11 +1426,12 @@
 
     function downloadMarkdownReport() {
       if (latestMarkdownContent) {
+        const effDate = (document.getElementById("targetDateInput").value || "").replace(/-/g, "");
         const blob = new Blob([latestMarkdownContent], { type: "text/markdown;charset=utf-8;" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `AIAdviseStocks_${currentBoardKey}_${latestReportId || "report"}.md`;
+        a.download = `AIAdviseStocks_${currentBoardKey}_${effDate || "report"}_${latestReportId || "md"}.md`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);

@@ -17,6 +17,7 @@ from src.services.stock_fetcher import (
     fetch_market_turnover_snapshots,
     fetch_stock_klines,
     fetch_taiex_klines,
+    resolve_nearest_trading_date,
 )
 from src.services.technical_indicators import compute_all_indicators
 
@@ -35,9 +36,12 @@ def _build_candidate_entry(
     prev_k = klines[-2] if (klines and len(klines) >= 2) else latest_k
 
     close_val = safe_float(
-        (snapshot or {}).get("close") or latest_k.get("close"),
+        latest_k.get("close") if klines else (snapshot or {}).get("close"),
         0.0,
     )
+    if close_val <= 0:
+        close_val = safe_float((snapshot or {}).get("close") or latest_k.get("close"), 0.0)
+
     if klines and len(klines) >= 2:
         prev_close = safe_float(prev_k.get("close"), close_val)
         change_val = round(close_val - prev_close, 2) if prev_close > 0 else 0.0
@@ -47,11 +51,14 @@ def _build_candidate_entry(
         change_pct = safe_float((snapshot or {}).get("change_pct"), 0.0)
 
     vol_val = safe_int(
-        (snapshot or {}).get("volume") or latest_k.get("volume"),
+        latest_k.get("volume") if klines else (snapshot or {}).get("volume"),
         0,
     )
+    if vol_val <= 0:
+        vol_val = safe_int((snapshot or {}).get("volume") or latest_k.get("volume"), 0)
+
     turnover_val = safe_float(
-        (snapshot or {}).get("turnover") or latest_k.get("turnover"),
+        latest_k.get("turnover") if klines else (snapshot or {}).get("turnover"),
         close_val * vol_val,
     )
     if turnover_val <= 0 and close_val > 0 and vol_val > 0:
@@ -61,6 +68,7 @@ def _build_candidate_entry(
         str((snapshot or {}).get("stock_name") or "").strip()
         or get_stock_name(stock_code, allow_network_lookup=False)
     )
+    entry_date = str(latest_k.get("date") or (snapshot or {}).get("date") or "")
 
     return {
         "rank": rank,
@@ -72,8 +80,10 @@ def _build_candidate_entry(
         "volume": vol_val,
         "turnover": round(turnover_val, 0),
         "turnover_yi": round(turnover_val / 1e8, 2),
-        "date": str(latest_k.get("date") or (snapshot or {}).get("date") or ""),
+        "date": entry_date,
+        "latest_date": entry_date,
         "board_id": board_cfg["id"],
+        "board_key": board_cfg["id"],
         "board_name": board_cfg["name"],
         "board_label": f"{board_cfg['name']} #{rank}",
     }
@@ -86,9 +96,10 @@ def get_board_candidates_metadata(
     *,
     board_key: Optional[str] = None,
     top_n: Optional[int] = None,
+    target_date: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """
-    依據指定榜單規則篩選出入選股票中繼資料列表（不強迫拉取全部完整歷史 K 線，適合快速預覽或選股初篩）：
+    依據指定榜單規則與指定交易日期 (target_date) 篩選出入選股票中繼資料列表：
     1. core_top20: 大盤核心榜（成交金額 Top 20）
     2. under100_top20: 百元精選榜（股價 < 100 元 且 成交金額 Top 20）
     3. popular_etf: 人氣 ETF 榜（固定追蹤 0050、0056、00878、00929 等市值與高股息龍頭）
@@ -99,21 +110,29 @@ def get_board_candidates_metadata(
     target_id = board_cfg["id"]
     limit = safe_int(effective_max_count, default=board_cfg.get("top_n", 20), min_val=1, max_val=30)
 
+    # 解析最近有效開盤交易日
+    date_info = resolve_nearest_trading_date(target_date, force_refresh=force_refresh)
+    effective_date = date_info["effective_date"]
+
     # 模式 3：人氣 ETF 榜（固定追蹤龍頭 ETF 清單）
     if target_id == "popular_etf":
         fixed_codes = list(board_cfg.get("fixed_codes") or POPULAR_ETF_CODES)[:limit]
-        snapshots = fetch_market_turnover_snapshots(force_refresh=force_refresh)
+        snapshots = fetch_market_turnover_snapshots(force_refresh=force_refresh, target_date=effective_date)
         snap_map = {s["stock_code"]: s for s in snapshots if s.get("stock_code")}
 
         results: List[Dict[str, Any]] = []
         for idx, code in enumerate(fixed_codes, start=1):
             snap = snap_map.get(code)
-            klines = fetch_stock_klines(code, days=10, force_refresh=force_refresh) if not snap else None
+            klines = (
+                fetch_stock_klines(code, days=10, force_refresh=force_refresh, end_date=effective_date)
+                if not snap
+                else None
+            )
             results.append(_build_candidate_entry(idx, code, board_cfg, snapshot=snap, klines=klines))
         return results
 
-    # 模式 1 與 2：需要全市場成交金額排序快照
-    snapshots = fetch_market_turnover_snapshots(force_refresh=force_refresh)
+    # 模式 1 與 2：需要指定交易日之全市場成交金額排序快照
+    snapshots = fetch_market_turnover_snapshots(force_refresh=force_refresh, target_date=effective_date)
 
     if target_id == "under100_top20":
         # 2. 百元精選榜：股價 < 100 元 且 成交金額 Top 20（排除 ETF，聚焦百元內個股）
@@ -122,14 +141,13 @@ def get_board_candidates_metadata(
             if 0 < safe_float(s.get("close"), 0.0) < 100.0
             and s.get("stock_code") not in POPULAR_ETF_CODES
         ]
-        # 若快照中不足 limit 檔，由 UNDER_100_FALLBACK_POOL 補齊並確保股價 < 100 元
         existing_codes = {s["stock_code"] for s in filtered}
         for code in UNDER_100_FALLBACK_POOL:
             if len(filtered) >= limit:
                 break
             if code in existing_codes:
                 continue
-            klines = fetch_stock_klines(code, days=10)
+            klines = fetch_stock_klines(code, days=10, end_date=effective_date)
             if klines and 0 < safe_float(klines[-1].get("close"), 0.0) < 100.0:
                 latest = klines[-1]
                 c_val = safe_float(latest.get("close"), 0.0)
@@ -141,7 +159,7 @@ def get_board_candidates_metadata(
                     "close": c_val,
                     "volume": v_val,
                     "turnover": t_val,
-                    "date": latest.get("date", ""),
+                    "date": latest.get("date", effective_date),
                 })
                 existing_codes.add(code)
 
@@ -164,7 +182,7 @@ def get_board_candidates_metadata(
             break
         if code in existing_core:
             continue
-        klines = fetch_stock_klines(code, days=10)
+        klines = fetch_stock_klines(code, days=10, end_date=effective_date)
         if klines:
             latest = klines[-1]
             c_val = safe_float(latest.get("close"), 0.0)
@@ -176,7 +194,7 @@ def get_board_candidates_metadata(
                 "close": c_val,
                 "volume": v_val,
                 "turnover": t_val,
-                "date": latest.get("date", ""),
+                "date": latest.get("date", effective_date),
             })
             existing_core.add(code)
 
@@ -199,13 +217,14 @@ def select_stocks_for_analysis(
     kline_days: Optional[int] = None,
     include_taiex: bool = True,
     custom_codes: Optional[List[str]] = None,
+    target_date: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    執行完整三大榜單自動選股流程：
+    執行完整三大榜單自動選股流程（支援指定分析日期 target_date，若非開盤日自動對齊最近開盤日）：
     1. 依指定榜單 (core_top20 / under100_top20 / popular_etf) 自動篩選出候選標的
-    2. 擷取大盤 (TAIEX) 與所有入選個股的歷史日 K 線數據
-    3. 呼叫 compute_all_indicators 預先計算所有技術指標 (MA5/20/60, VOL_MA5/20, RSI14, MACD, DMI, ATR14)
-    4. 回傳包含榜單資訊、入選個股明細與 klines_map 的完整結構供第一層與第二層 AI 代理分析
+    2. 擷取大盤 (TAIEX) 與所有入選個股截至 effective_date 的歷史日 K 線數據
+    3. 呼叫 compute_all_indicators 預先計算所有技術指標
+    4. 回傳包含日期校驗結果、榜單資訊、入選個股明細與 klines_map 的完整結構
     """
     effective_board_id = board_key or board_id or "core_top20"
     effective_max_count = top_n if top_n is not None else max_count
@@ -214,11 +233,17 @@ def select_stocks_for_analysis(
     board_cfg = get_board_config(effective_board_id)
     days = safe_int(effective_days, default=config.kline_history_days, min_val=30, max_val=365)
 
-    logger.info(f"[自動選股器] 正在執行「{board_cfg['name']} ({board_cfg['id']})」自動選股...")
+    date_info = resolve_nearest_trading_date(target_date, force_refresh=force_refresh)
+    effective_date = date_info["effective_date"]
+
+    logger.info(
+        f"[自動選股器] 正在執行「{board_cfg['name']} ({board_cfg['id']})」自動選股 (基準開盤日: {effective_date})..."
+    )
     raw_candidates = get_board_candidates_metadata(
         board_id=board_cfg["id"],
         max_count=effective_max_count,
         force_refresh=force_refresh,
+        target_date=effective_date,
     )
 
     if custom_codes:
@@ -233,20 +258,20 @@ def select_stocks_for_analysis(
 
     klines_map: Dict[str, List[Dict[str, Any]]] = {}
 
-    # 1. 載入並計算大盤 TAIEX 歷史 K 線與技術指標
+    # 1. 載入並計算大盤 TAIEX 歷史 K 線與技術指標（截斷至 effective_date）
     if include_taiex:
-        taiex_klines = fetch_taiex_klines(days=days, force_refresh=force_refresh)
+        taiex_klines = fetch_taiex_klines(days=days, force_refresh=force_refresh, end_date=effective_date)
         if taiex_klines:
             compute_all_indicators(taiex_klines)
             klines_map["TAIEX"] = taiex_klines
 
-    # 2. 載入並計算每檔入選股票之歷史 K 線與技術指標，同步更新最新收盤價與成交金額
+    # 2. 載入並計算每檔入選股票之歷史 K 線與技術指標（截斷至 effective_date）
     enriched_candidates: List[Dict[str, Any]] = []
     stock_codes: List[str] = []
 
-    for idx, cand in enumerate(raw_candidates, start=1):
+    for cand in raw_candidates:
         code = cand["stock_code"]
-        klines = fetch_stock_klines(code, days=days, force_refresh=force_refresh)
+        klines = fetch_stock_klines(code, days=days, force_refresh=force_refresh, end_date=effective_date)
         if not klines:
             continue
         compute_all_indicators(klines)
@@ -260,7 +285,6 @@ def select_stocks_for_analysis(
             snapshot=cand,
             klines=klines,
         )
-        # 附加最新關鍵技術指標快照供前端預覽
         latest_k = klines[-1]
         updated_entry["ma5"] = round(safe_float(latest_k.get("ma5"), 0.0), 2) if latest_k.get("ma5") is not None else None
         updated_entry["ma20"] = round(safe_float(latest_k.get("ma20"), 0.0), 2) if latest_k.get("ma20") is not None else None
@@ -269,7 +293,7 @@ def select_stocks_for_analysis(
         enriched_candidates.append(updated_entry)
 
     logger.info(
-        f"[自動選股器] 「{board_cfg['name']}」篩選完成，共入選 {len(stock_codes)} 檔標的: {stock_codes}"
+        f"[自動選股器] 「{board_cfg['name']}」({effective_date}) 篩選完成，共入選 {len(stock_codes)} 檔標的: {stock_codes}"
     )
 
     return {
@@ -278,6 +302,10 @@ def select_stocks_for_analysis(
         "board_name": board_cfg["name"],
         "board_desc": board_cfg["desc"],
         "board_description": board_cfg["desc"],
+        "requested_date": date_info["requested_date"],
+        "effective_date": effective_date,
+        "date_adjusted": date_info["date_adjusted"],
+        "date_warning": date_info["date_warning"],
         "stock_codes": stock_codes,
         "selected_codes": stock_codes,
         "candidates": enriched_candidates,
@@ -298,4 +326,3 @@ def list_available_boards() -> List[Dict[str, Any]]:
         }
         for cfg in AUTO_SELECT_BOARDS.values()
     ]
-

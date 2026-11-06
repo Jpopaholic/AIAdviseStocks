@@ -23,7 +23,7 @@ logger = logging.getLogger("StockFetcher")
 
 # 記憶體快取結構 (無外部資料庫依賴)
 _KLINES_CACHE: Dict[str, Tuple[List[Dict[str, Any]], float]] = {}
-_MARKET_SNAPSHOT_CACHE: Tuple[List[Dict[str, Any]], float] = ([], 0.0)
+_MARKET_SNAPSHOT_CACHE: Dict[str, Tuple[List[Dict[str, Any]], float]] = {}
 _QUOTE_CACHE: Dict[str, Tuple[Dict[str, Any], float]] = {}
 
 HEADERS = {
@@ -34,12 +34,22 @@ HEADERS = {
     "Accept": "application/json, text/plain, */*",
 }
 
+# 常見台股固定國定假日 (月-日)，供備援模式模擬休市判斷
+TW_FIXED_HOLIDAYS_MMDD = {
+    "01-01",  # 元旦
+    "02-28",  # 和平紀念日
+    "04-04",  # 兒童節
+    "04-05",  # 清明節
+    "05-01",  # 勞動節
+    "10-10",  # 國慶日
+}
+
 
 def clear_stock_cache() -> None:
     """清除所有記憶體中的 K 線、報價與全市場排行快取。"""
     global _KLINES_CACHE, _MARKET_SNAPSHOT_CACHE, _QUOTE_CACHE
     _KLINES_CACHE.clear()
-    _MARKET_SNAPSHOT_CACHE = ([], 0.0)
+    _MARKET_SNAPSHOT_CACHE.clear()
     _QUOTE_CACHE.clear()
     logger.info("已清除所有記憶體股價與 K 線快取。")
 
@@ -69,9 +79,9 @@ def _validate_kline_row(row: Dict[str, Any]) -> bool:
     return True
 
 
-def _fetch_yahoo_chart_klines(symbol: str, stock_code: str, range_str: str = "6mo") -> List[Dict[str, Any]]:
+def _fetch_yahoo_chart_klines(symbol: str, stock_code: str, range_str: str = "1y") -> List[Dict[str, Any]]:
     """
-    透過 Yahoo Finance v8 Chart API 快速擷取多月份日 K 線數據 (單次請求即可獲得約 120 根日 K)。
+    透過 Yahoo Finance v8 Chart API 快速擷取近一年日 K 線數據 (單次請求即可獲得約 245 根日 K)。
     """
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range={range_str}&interval=1d"
     resp = requests.get(url, headers=HEADERS, timeout=8)
@@ -109,9 +119,7 @@ def _fetch_yahoo_chart_klines(symbol: str, stock_code: str, range_str: str = "6m
 
         dt_str = datetime.fromtimestamp(int(ts), tz=timezone.utc).astimezone(tw_tz).strftime("%Y-%m-%d")
 
-        # Yahoo Finance 對 ^TWII 大盤的 volume 常以百萬或億為單位，若是個股則為股數
         if stock_code == "TAIEX":
-            # 若 vol_raw 小於 1e7，通常代表單位為百萬新台幣，轉換為元以符合大盤成交金額格式
             vol_val = int(vol_raw * 1_000_000) if (0 < vol_raw < 10_000_000) else int(vol_raw)
             turnover_val = float(vol_val)
         else:
@@ -224,10 +232,10 @@ def _fetch_twse_taiex_month(date_yyyymmdd: str) -> List[Dict[str, Any]]:
     return klines
 
 
-def _generate_fallback_klines(stock_code: str, days: int = 90) -> List[Dict[str, Any]]:
+def _generate_fallback_klines(stock_code: str, days: int = 180) -> List[Dict[str, Any]]:
     """
     當外部網路處於離線或封鎖環境時的決定性備援 K 線生成器，
-    確保系統展示與單元測試在無網路環境下仍具備符合真實價位區間的完整歷史序列。
+    自動排除週六、週日與台灣固定國定假日，確保非開盤日檢測與歷史回溯正常運作。
     """
     seed_val = sum(ord(ch) * (idx + 1) for idx, ch in enumerate(stock_code))
     if stock_code == "TAIEX":
@@ -242,13 +250,15 @@ def _generate_fallback_klines(stock_code: str, days: int = 90) -> List[Dict[str,
         base_price = 115.0 + (seed_val % 180)
 
     now_dt = get_taiwan_datetime()
+    target_total = max(days, 180)
     klines: List[Dict[str, Any]] = []
-    price = base_price * 0.92
+    price = base_price * 0.90
 
-    curr_dt = now_dt - timedelta(days=int(days * 1.5))
+    curr_dt = now_dt - timedelta(days=int(target_total * 1.6))
     idx = 0
-    while len(klines) < days and curr_dt <= now_dt:
-        if curr_dt.weekday() < 5:
+    while curr_dt <= now_dt:
+        mm_dd = curr_dt.strftime("%m-%d")
+        if curr_dt.weekday() < 5 and mm_dd not in TW_FIXED_HOLIDAYS_MMDD:
             wave = math.sin((idx + seed_val) * 0.23) * 0.015 + math.cos((idx + seed_val) * 0.11) * 0.008
             drift = 0.0012 if (seed_val % 3 != 0) else -0.0004
             open_p = round(price * (1.0 + wave * 0.3), 2)
@@ -256,7 +266,6 @@ def _generate_fallback_klines(stock_code: str, days: int = 90) -> List[Dict[str,
             high_p = round(max(open_p, close_p) * (1.0 + abs(wave) * 0.6 + 0.004), 2)
             low_p = round(min(open_p, close_p) * (1.0 - abs(wave) * 0.5 - 0.004), 2)
 
-            # 確保百元精選備援池的股價嚴格小於 100 元
             if stock_code in UNDER_100_FALLBACK_POOL and close_p >= 98.0:
                 scale = 85.0 / close_p
                 open_p = round(open_p * scale, 2)
@@ -285,34 +294,52 @@ def _generate_fallback_klines(stock_code: str, days: int = 90) -> List[Dict[str,
             idx += 1
         curr_dt += timedelta(days=1)
 
-    return klines
+    return klines[-target_total:]
 
 
-def fetch_taiex_klines(days: int = 90, force_refresh: bool = False) -> List[Dict[str, Any]]:
+def _slice_klines_by_date(
+    klines: List[Dict[str, Any]],
+    days: int,
+    end_date: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """依指定基準日 (end_date) 截斷 K 線序列，並取最近 days 根日 K 線。"""
+    if end_date:
+        clean_end = str(end_date).strip()[:10]
+        filtered = [dict(k) for k in klines if str(k.get("date", "")) <= clean_end]
+        if filtered:
+            return filtered[-days:]
+    return [dict(k) for k in klines[-days:]]
+
+
+def fetch_taiex_klines(
+    days: int = 90,
+    force_refresh: bool = False,
+    end_date: Optional[str] = None,
+) -> List[Dict[str, Any]]:
     """
-    擷取台股大盤加權指數 (TAIEX) 的歷史日 K 線數據 (含記憶體 TTL 快取)。
+    擷取台股大盤加權指數 (TAIEX) 的歷史日 K 線數據 (含記憶體 TTL 快取與指定基準日截斷)。
     """
     cache_key = "TAIEX"
     now = time.time()
     if not force_refresh and cache_key in _KLINES_CACHE:
         cached_data, ts = _KLINES_CACHE[cache_key]
         if now - ts < config.cache_ttl_seconds and len(cached_data) >= 30:
-            return [dict(k) for k in cached_data[-days:]]
+            return _slice_klines_by_date(cached_data, days=days, end_date=end_date)
 
     klines: List[Dict[str, Any]] = []
 
-    # 1. 優先使用 Yahoo Finance ^TWII 快速取得近 6 個月日 K 線
+    # 1. 優先使用 Yahoo Finance ^TWII 快速取得近 1 年日 K 線
     try:
-        klines = _fetch_yahoo_chart_klines("^TWII", "TAIEX", range_str="6mo")
+        klines = _fetch_yahoo_chart_klines("^TWII", "TAIEX", range_str="1y")
     except Exception as e:
         logger.debug(f"Yahoo Finance 擷取 TAIEX 失敗，將嘗試證交所 API: {e}")
 
-    # 2. 若大盤成交金額為 0 或 Yahoo 失敗，嘗試自證交所補齊最近兩個月
+    # 2. 若失敗，嘗試自證交所補齊最近三個月
     if not klines:
         try:
             tw_now = get_taiwan_datetime()
             merged: Dict[str, Dict[str, Any]] = {}
-            for m_offset in range(3):
+            for m_offset in range(4):
                 dt = tw_now - timedelta(days=28 * m_offset)
                 m_klines = _fetch_twse_taiex_month(dt.strftime("%Y%m01"))
                 for item in m_klines:
@@ -324,34 +351,131 @@ def fetch_taiex_klines(days: int = 90, force_refresh: bool = False) -> List[Dict
     # 3. 離線或封鎖環境備援
     if not klines:
         logger.warning("外部大盤 API 暫時無法連線，使用內建備援大盤 K 線序列。")
-        klines = _generate_fallback_klines("TAIEX", days=max(days, 90))
+        klines = _generate_fallback_klines("TAIEX", days=max(days, 180))
 
     _KLINES_CACHE[cache_key] = (klines, now)
-    return [dict(k) for k in klines[-days:]]
+    return _slice_klines_by_date(klines, days=days, end_date=end_date)
 
 
-def fetch_stock_klines(stock_code: str, days: int = 90, force_refresh: bool = False) -> List[Dict[str, Any]]:
+def resolve_nearest_trading_date(
+    target_date: Optional[str] = None,
+    force_refresh: bool = False,
+) -> Dict[str, Any]:
     """
-    擷取指定台股個股或 ETF 的歷史日 K 線數據 (含記憶體 TTL 快取)。
+    檢查使用者選擇的日期 (YYYY-MM-DD) 是否有台股開盤資料：
+    - 若該日有開盤，直接回傳 effective_date = requested_date, date_adjusted = False
+    - 若該日無開盤（週末、國定假日、休市或未來日期），自動尋找距離該日期最近的開盤日
+      （距離天數相同時優先選擇該日之前的最近交易日），並回傳警告訊息 date_warning。
+    """
+    raw_req = str(target_date or "").strip()[:10]
+    requested_date = raw_req if raw_req else get_taiwan_date_str()
+
+    # 取得大盤完整歷史交易日清單
+    taiex_all = fetch_taiex_klines(days=250, force_refresh=force_refresh, end_date=None)
+    available_dates = sorted({str(k.get("date", "")).strip() for k in taiex_all if k.get("date")})
+
+    if not available_dates:
+        return {
+            "requested_date": requested_date,
+            "effective_date": requested_date,
+            "is_trading_day": True,
+            "date_adjusted": False,
+            "date_warning": None,
+            "available_min_date": requested_date,
+            "available_max_date": requested_date,
+        }
+
+    # 若所選日期正好在開盤交易日清單中
+    if requested_date in available_dates:
+        return {
+            "requested_date": requested_date,
+            "effective_date": requested_date,
+            "is_trading_day": True,
+            "date_adjusted": False,
+            "date_warning": None,
+            "available_min_date": available_dates[0],
+            "available_max_date": available_dates[-1],
+        }
+
+    # 若所選日期沒有開盤，計算距離每個有效開盤日的天數差距，取最近開盤日
+    try:
+        req_dt = datetime.strptime(requested_date, "%Y-%m-%d").date()
+    except ValueError:
+        effective = available_dates[-1]
+        return {
+            "requested_date": requested_date,
+            "effective_date": effective,
+            "is_trading_day": False,
+            "date_adjusted": True,
+            "date_warning": f"⚠️ 輸入的日期格式 ({requested_date}) 無效，系統已自動切換為最新開盤交易日：{effective}。",
+            "available_min_date": available_dates[0],
+            "available_max_date": available_dates[-1],
+        }
+
+    def _distance_key(cand_str: str) -> Tuple[int, int]:
+        cand_dt = datetime.strptime(cand_str, "%Y-%m-%d").date()
+        diff_days = abs((cand_dt - req_dt).days)
+        # 距離相同時，優先選擇 <= requested_date 的前一個開盤日 (0 優先於 1)
+        is_after = 0 if cand_dt <= req_dt else 1
+        return (diff_days, is_after)
+
+    nearest_date = min(available_dates, key=_distance_key)
+
+    weekday_names = ["週一", "週二", "週三", "週四", "週五", "週六", "週日"]
+    req_wk = weekday_names[req_dt.weekday()]
+    near_dt = datetime.strptime(nearest_date, "%Y-%m-%d").date()
+    near_wk = weekday_names[near_dt.weekday()]
+
+    if req_dt > datetime.strptime(available_dates[-1], "%Y-%m-%d").date():
+        reason_hint = "尚未收盤或為未來/休市日期"
+    elif req_dt.weekday() >= 5:
+        reason_hint = f"適逢週末休市 ({req_wk})"
+    else:
+        reason_hint = f"適逢台股休市日 ({req_wk})"
+
+    warning_msg = (
+        f"⚠️ 您選擇的日期 {requested_date}（{reason_hint}）當日沒有開盤資料，"
+        f"系統已自動為您切換至距離最近的開盤交易日：{nearest_date}（{near_wk}）。"
+    )
+
+    return {
+        "requested_date": requested_date,
+        "effective_date": nearest_date,
+        "is_trading_day": False,
+        "date_adjusted": True,
+        "date_warning": warning_msg,
+        "available_min_date": available_dates[0],
+        "available_max_date": available_dates[-1],
+    }
+
+
+def fetch_stock_klines(
+    stock_code: str,
+    days: int = 90,
+    force_refresh: bool = False,
+    end_date: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """
+    擷取指定台股個股或 ETF 的歷史日 K 線數據 (含記憶體 TTL 快取與指定基準日截斷)。
     """
     clean_code = str(stock_code or "").strip().upper()
     if not clean_code:
         return []
     if clean_code == "TAIEX":
-        return fetch_taiex_klines(days=days, force_refresh=force_refresh)
+        return fetch_taiex_klines(days=days, force_refresh=force_refresh, end_date=end_date)
 
     now = time.time()
     if not force_refresh and clean_code in _KLINES_CACHE:
         cached_data, ts = _KLINES_CACHE[clean_code]
         if now - ts < config.cache_ttl_seconds and len(cached_data) >= 20:
-            return [dict(k) for k in cached_data[-days:]]
+            return _slice_klines_by_date(cached_data, days=days, end_date=end_date)
 
     klines: List[Dict[str, Any]] = []
 
     # 1. 嘗試 Yahoo Finance (.TW 上市 / .TWO 上櫃)
     for suffix in (".TW", ".TWO"):
         try:
-            klines = _fetch_yahoo_chart_klines(f"{clean_code}{suffix}", clean_code, range_str="6mo")
+            klines = _fetch_yahoo_chart_klines(f"{clean_code}{suffix}", clean_code, range_str="1y")
             if len(klines) >= 15:
                 break
         except Exception:
@@ -362,7 +486,7 @@ def fetch_stock_klines(stock_code: str, days: int = 90, force_refresh: bool = Fa
         try:
             tw_now = get_taiwan_datetime()
             merged: Dict[str, Dict[str, Any]] = {}
-            for m_offset in range(3):
+            for m_offset in range(4):
                 dt = tw_now - timedelta(days=28 * m_offset)
                 m_klines = _fetch_twse_stock_month(clean_code, dt.strftime("%Y%m01"))
                 for item in m_klines:
@@ -374,70 +498,85 @@ def fetch_stock_klines(stock_code: str, days: int = 90, force_refresh: bool = Fa
     # 3. 離線備援
     if not klines:
         logger.warning(f"無法自外部網路取得 {clean_code} K 線，啟用內建備援 K 線。")
-        klines = _generate_fallback_klines(clean_code, days=max(days, 90))
+        klines = _generate_fallback_klines(clean_code, days=max(days, 180))
 
     _KLINES_CACHE[clean_code] = (klines, now)
-    return [dict(k) for k in klines[-days:]]
+    return _slice_klines_by_date(klines, days=days, end_date=end_date)
 
 
-def fetch_market_turnover_snapshots(force_refresh: bool = False) -> List[Dict[str, Any]]:
+def fetch_market_turnover_snapshots(
+    force_refresh: bool = False,
+    target_date: Optional[str] = None,
+) -> List[Dict[str, Any]]:
     """
-    擷取台股市場每日成交金額與收盤價排行快照，供三大自動選股榜單篩選：
+    擷取台股市場指定交易日之成交金額與收盤價排行快照，供三大自動選股榜單篩選：
     - 大盤核心榜（成交金額 Top 20）
     - 百元精選榜（股價 < 100 元 且 成交金額 Top 20）
-    每筆結構包含：stock_code, stock_name, close, volume, turnover (成交金額元), change_pct
+    支援傳入 target_date (YYYY-MM-DD) 取得特定歷史交易日或最新交易日行情。
     """
     global _MARKET_SNAPSHOT_CACHE
+    clean_date = str(target_date or "").strip()[:10]
+    cache_key = clean_date or "LATEST"
     now = time.time()
-    cached_list, ts = _MARKET_SNAPSHOT_CACHE
-    if not force_refresh and cached_list and (now - ts < config.cache_ttl_seconds):
-        return [dict(item) for item in cached_list]
+
+    if not force_refresh and cache_key in _MARKET_SNAPSHOT_CACHE:
+        cached_list, ts = _MARKET_SNAPSHOT_CACHE[cache_key]
+        if cached_list and (now - ts < config.cache_ttl_seconds):
+            return [dict(item) for item in cached_list]
+
+    # 判斷是否為最新一個交易日
+    taiex_recent = fetch_taiex_klines(days=5, force_refresh=False)
+    latest_market_date = taiex_recent[-1]["date"] if taiex_recent else get_taiwan_date_str()
+    is_latest_date = (not clean_date) or (clean_date >= latest_market_date)
+    effective_snap_date = clean_date if clean_date else latest_market_date
 
     snapshots_by_code: Dict[str, Dict[str, Any]] = {}
 
-    # 1. 優先嘗試 TWSE OpenAPI (STOCK_DAY_ALL)：單次請求即可取得最近一個有效交易日全市場收盤價、漲跌與成交金額（休市與週末亦有資料）
-    try:
-        openapi_url = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"
-        resp_open = requests.get(openapi_url, headers=HEADERS, timeout=5)
-        if resp_open.status_code == 200:
-            rows = resp_open.json()
-            if isinstance(rows, list):
-                for r in rows:
-                    try:
-                        code = str(r.get("Code") or "").strip()
-                        if not (len(code) == 4 and code.isdigit()) and code not in POPULAR_ETF_CODES:
+    # 1. 若查詢最新交易日，優先使用 TWSE OpenAPI (STOCK_DAY_ALL) 單次請求高速取得
+    if is_latest_date:
+        try:
+            openapi_url = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"
+            resp_open = requests.get(openapi_url, headers=HEADERS, timeout=5)
+            if resp_open.status_code == 200:
+                rows = resp_open.json()
+                if isinstance(rows, list):
+                    for r in rows:
+                        try:
+                            code = str(r.get("Code") or "").strip()
+                            if not (len(code) == 4 and code.isdigit()) and code not in POPULAR_ETF_CODES:
+                                continue
+                            name = str(r.get("Name") or "").strip()
+                            close_val = _parse_number(r.get("ClosingPrice"), 0.0)
+                            vol_val = int(_parse_number(r.get("TradeVolume"), 0.0))
+                            turnover_val = _parse_number(r.get("TradeValue"), 0.0)
+                            change_val = _parse_number(r.get("Change"), 0.0)
+                            if close_val <= 0 or turnover_val <= 0:
+                                continue
+                            prev_close = close_val - change_val
+                            change_pct = round((change_val / prev_close) * 100.0, 2) if prev_close > 0 else 0.0
+                            if name:
+                                register_stock_name(code, name)
+                            snapshots_by_code[code] = {
+                                "stock_code": code,
+                                "stock_name": name or get_stock_name(code, allow_network_lookup=False),
+                                "close": close_val,
+                                "change": round(change_val, 2),
+                                "change_pct": change_pct,
+                                "volume": vol_val,
+                                "turnover": turnover_val,
+                                "date": effective_snap_date,
+                            }
+                        except Exception:
                             continue
-                        name = str(r.get("Name") or "").strip()
-                        close_val = _parse_number(r.get("ClosingPrice"), 0.0)
-                        vol_val = int(_parse_number(r.get("TradeVolume"), 0.0))
-                        turnover_val = _parse_number(r.get("TradeValue"), 0.0)
-                        change_val = _parse_number(r.get("Change"), 0.0)
-                        if close_val <= 0 or turnover_val <= 0:
-                            continue
-                        prev_close = close_val - change_val
-                        change_pct = round((change_val / prev_close) * 100.0, 2) if prev_close > 0 else 0.0
-                        if name:
-                            register_stock_name(code, name)
-                        snapshots_by_code[code] = {
-                            "stock_code": code,
-                            "stock_name": name or get_stock_name(code, allow_network_lookup=False),
-                            "close": close_val,
-                            "change": round(change_val, 2),
-                            "change_pct": change_pct,
-                            "volume": vol_val,
-                            "turnover": turnover_val,
-                            "date": get_taiwan_date_str(),
-                        }
-                    except Exception:
-                        continue
-    except Exception as e:
-        logger.debug(f"TWSE OpenAPI STOCK_DAY_ALL 擷取失敗: {e}")
+        except Exception as e:
+            logger.debug(f"TWSE OpenAPI STOCK_DAY_ALL 擷取失敗: {e}")
 
-    # 2. 若 OpenAPI 無資料，嘗試自 TWSE MI_INDEX ALLBUT0999 擷取
+    # 2. 若為歷史指定日期（或 OpenAPI 無資料），嘗試使用支援 date=YYYYMMDD 的 TWSE MI_INDEX API
     if not snapshots_by_code:
         try:
-            url = "https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX?type=ALLBUT0999&response=json"
-            resp = requests.get(url, headers=HEADERS, timeout=5)
+            date_compact = effective_snap_date.replace("-", "")
+            url = f"https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX?date={date_compact}&type=ALLBUT0999&response=json"
+            resp = requests.get(url, headers=HEADERS, timeout=6)
             if resp.status_code == 200:
                 data = resp.json()
                 tables = data.get("tables") or []
@@ -450,6 +589,8 @@ def fetch_market_turnover_snapshots(force_refresh: bool = False) -> List[Dict[st
                         idx_vol = fields.index("成交股數") if "成交股數" in fields else 2
                         idx_turn = fields.index("成交金額")
                         idx_close = fields.index("收盤價")
+                        idx_diff = fields.index("漲跌價差") if "漲跌價差" in fields else -1
+                        idx_sign = fields.index("漲跌(+/-)") if "漲跌(+/-)" in fields else -1
                         for r in rows:
                             try:
                                 code = str(r[idx_code]).strip()
@@ -461,26 +602,40 @@ def fetch_market_turnover_snapshots(force_refresh: bool = False) -> List[Dict[st
                                 turnover_val = _parse_number(r[idx_turn], 0.0)
                                 if close_val <= 0 or turnover_val <= 0:
                                     continue
+                                chg_val = 0.0
+                                if idx_diff >= 0:
+                                    chg_val = _parse_number(r[idx_diff], 0.0)
+                                    if idx_sign >= 0 and "-" in str(r[idx_sign]):
+                                        chg_val = -abs(chg_val)
+                                prev_c = close_val - chg_val
+                                chg_pct = round((chg_val / prev_c) * 100.0, 2) if prev_c > 0 else 0.0
                                 register_stock_name(code, name)
                                 snapshots_by_code[code] = {
                                     "stock_code": code,
                                     "stock_name": name,
                                     "close": close_val,
+                                    "change": round(chg_val, 2),
+                                    "change_pct": chg_pct,
                                     "volume": vol_val,
                                     "turnover": turnover_val,
+                                    "date": effective_snap_date,
                                 }
                             except Exception:
                                 continue
         except Exception as e:
-            logger.debug(f"TWSE MI_INDEX 全市場快照擷取失敗: {e}")
+            logger.debug(f"TWSE MI_INDEX ({effective_snap_date}) 全市場快照擷取失敗: {e}")
 
-    # 3. 若外部證交所全市場快照皆受限（例如海外 Serverless 節點或離線環境），快速產生備援快照以確保預覽秒回傳
+    # 3. 若外部證交所全市場快照受限，依 effective_snap_date 截斷候選池 K 線產生當日快照
     if not snapshots_by_code:
         candidate_codes = list(
             dict.fromkeys(CORE_MARKET_FALLBACK_POOL + UNDER_100_FALLBACK_POOL + POPULAR_ETF_CODES)
         )
         for code in candidate_codes:
-            klines = _generate_fallback_klines(code, days=5)
+            klines = _slice_klines_by_date(
+                _generate_fallback_klines(code, days=180),
+                days=5,
+                end_date=effective_snap_date,
+            )
             if not klines:
                 continue
             latest = klines[-1]
@@ -500,7 +655,7 @@ def fetch_market_turnover_snapshots(force_refresh: bool = False) -> List[Dict[st
                 "change_pct": chg_pct,
                 "volume": vol_val,
                 "turnover": turnover_val if turnover_val > 0 else close_val * vol_val,
-                "date": latest.get("date", get_taiwan_date_str()),
+                "date": latest.get("date", effective_snap_date),
             }
 
     sorted_snapshots = sorted(
@@ -508,7 +663,7 @@ def fetch_market_turnover_snapshots(force_refresh: bool = False) -> List[Dict[st
         key=lambda x: safe_float(x.get("turnover"), 0.0),
         reverse=True,
     )
-    _MARKET_SNAPSHOT_CACHE = (sorted_snapshots, now)
+    _MARKET_SNAPSHOT_CACHE[cache_key] = (sorted_snapshots, now)
     return [dict(item) for item in sorted_snapshots]
 
 

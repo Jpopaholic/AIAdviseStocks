@@ -23,6 +23,7 @@ from src.config import (
 from src.services.stock_fetcher import (
     fetch_taiex_klines,
     fetch_stock_klines,
+    resolve_nearest_trading_date,
     clear_stock_cache,
 )
 from src.services.technical_indicators import compute_all_indicators
@@ -53,8 +54,8 @@ logger = logging.getLogger("WebServer")
 
 app = FastAPI(
     title="AIAdviseStocks 台股兩層式 AI 選股與技術分析系統",
-    description="保留第一層大盤氣候診斷與第二層個股五維度量化評分，支援三大自動選股榜單、BYOK 自備金鑰、Vercel Serverless 與 Markdown 報告匯出",
-    version="1.1.0",
+    description="保留第一層大盤氣候診斷與第二層個股五維度量化評分，支援三大自動選股榜單、指定日期自動對齊最近開盤日、BYOK 自備金鑰與 Markdown 報告匯出",
+    version="1.2.0",
 )
 
 # 掛載靜態資源目錄
@@ -73,10 +74,14 @@ MAX_REPORT_HISTORY = 10
 ANALYSIS_STATE: Dict[str, Any] = {
     "is_running": False,
     "stop_requested": False,
-    "phase": "IDLE",  # IDLE | LAYER1_REGIME | AUTO_SELECT | LAYER2_ANALYST | COMPLETED | STOPPED | ERROR
+    "phase": "IDLE",
     "phase_label": "待命準備中",
     "board_key": "core_top20",
     "board_label": AUTO_SELECT_BOARDS["core_top20"]["name"],
+    "requested_date": "",
+    "effective_date": "",
+    "date_adjusted": False,
+    "date_warning": None,
     "progress_current": 0,
     "progress_total": 0,
     "current_stock": "",
@@ -156,6 +161,10 @@ def build_markdown_report(report: Dict[str, Any]) -> str:
     scores: List[Dict[str, Any]] = report.get("analyst_scores") or []
     candidates: List[Dict[str, Any]] = report.get("candidates") or []
 
+    effective_date = report.get("effective_date") or regime_data.get("taiex_date") or ""
+    requested_date = report.get("requested_date") or effective_date
+    date_warning = report.get("date_warning")
+
     regime_raw = regime_data.get("regime", "CALM_RANGE")
     posture_raw = regime_data.get("posture", "CHOPPY_TACTICAL")
     regime_cn = REGIME_CN_MAP.get(regime_raw, regime_raw)
@@ -164,17 +173,27 @@ def build_markdown_report(report: Dict[str, Any]) -> str:
     cash_ratio = safe_float(regime_data.get("target_cash_ratio"), 0.35) * 100.0
     allowed_styles = ", ".join(regime_data.get("allowed_buy_styles") or ["PULLBACK"])
     taiex_close = safe_float(regime_data.get("taiex_close"), 0.0)
-    taiex_date = regime_data.get("taiex_date") or ""
+    taiex_date = regime_data.get("taiex_date") or effective_date
+
+    date_line = f"- **分析基準開盤日**：`{effective_date}`"
+    if requested_date and requested_date != effective_date:
+        date_line += f" *(原選擇日期 `{requested_date}` 非開盤日，已自動對齊最近開盤日)*"
 
     md_lines: List[str] = [
         f"# 📊 AIAdviseStocks 台股兩層式 AI 量化分析報告",
         "",
         f"- **報告生成時間 (UTC+8)**：`{created_at}`",
+        date_line,
         f"- **選股榜單模式**：**{board_label}**",
         f"- **使用 AI 模型**：`{provider_name} / {model_name}`",
         f"- **分析完成檔數**：`{len(scores)} / {len(candidates) or len(scores)} 檔`"
         + (" *(使用者手動提前終止)*" if stopped_early else ""),
         f"- **Token 消耗統計**：Prompt `{usage.get('prompt_tokens', 0):,}` + Completion `{usage.get('completion_tokens', 0):,}` = 總計 `{usage.get('total_tokens', 0):,}` Tokens（呼叫 `{usage.get('calls', 0)}` 次）",
+    ]
+    if date_warning:
+        md_lines.extend(["", f"> {date_warning}"])
+
+    md_lines.extend([
         "",
         "---",
         "",
@@ -197,9 +216,9 @@ def build_markdown_report(report: Dict[str, Any]) -> str:
         "",
         "---",
         "",
-        f"## 🏆 第二層：個股五維度量化評分排行榜 ({board_label})",
+        f"## 🏆 第二層：個股五維度量化評分排行榜 ({board_label} — 基準日 {effective_date})",
         "",
-    ]
+    ])
 
     if not scores:
         md_lines.append("*本輪無個股評分資料。*")
@@ -252,7 +271,7 @@ def build_markdown_report(report: Dict[str, Any]) -> str:
 
             md_lines.extend([
                 f"### #{rk} `{code}` {name} — 總分：**{tot} / 100 分**",
-                f"- **所屬榜單**：{b_label} ｜ **最新收盤價**：`{price:,.2f}` 元 (`{chg_str}`) ｜ **資料日期**：`{item.get('latest_date', '')}`",
+                f"- **所屬榜單**：{b_label} ｜ **最新收盤價**：`{price:,.2f}` 元 (`{chg_str}`) ｜ **資料日期**：`{item.get('latest_date', effective_date)}`",
                 f"- **五維度得分**：趨勢 `{item.get('trend_score')}/20` ｜ 動能 `{item.get('momentum_score')}/20` ｜ 量能 `{item.get('volume_score')}/20` ｜ 安全防守 `{item.get('safety_score')}/20` ｜ 大盤一致性 `{item.get('regime_score')}/20` （信心指數：`{safe_float(item.get('confidence'), 0.0) * 100:.0f}%`）",
                 f"- **關鍵技術指標**：MA5 `{ma5 if ma5 is not None else 'N/A'}` ｜ MA20 `{ma20 if ma20 is not None else 'N/A'}` ｜ MA60 `{ma60 if ma60 is not None else 'N/A'}` ｜ RSI(14) `{rsi14 if rsi14 is not None else 'N/A'}` ｜ ATR 波動率 `{atr_pct:.2f}%`",
                 f"- **AI 技術分析理由**：{item.get('reason', '')}",
@@ -276,6 +295,7 @@ def _run_two_layer_analysis_task(
     model_name: str,
     board_key: str,
     top_n: int,
+    target_date: Optional[str] = None,
     custom_codes: Optional[List[str]] = None,
 ) -> None:
     usage_tracker = {
@@ -288,16 +308,28 @@ def _run_two_layer_analysis_task(
     board_label = board_info["name"]
 
     try:
+        date_info = resolve_nearest_trading_date(target_date)
+        effective_date = date_info["effective_date"]
+        requested_date = date_info["requested_date"]
+        date_warning = date_info["date_warning"]
+
         with _STATE_LOCK:
+            ANALYSIS_STATE["requested_date"] = requested_date
+            ANALYSIS_STATE["effective_date"] = effective_date
+            ANALYSIS_STATE["date_adjusted"] = date_info["date_adjusted"]
+            ANALYSIS_STATE["date_warning"] = date_warning
             ANALYSIS_STATE["phase"] = "LAYER1_REGIME"
-            ANALYSIS_STATE["phase_label"] = "第一層：正在擷取 TAIEX 大盤 K 線並診斷市場氣候..."
+            ANALYSIS_STATE["phase_label"] = f"第一層：正在擷取截至 {effective_date} 之 TAIEX 大盤 K 線並診斷市場氣候..."
             ANALYSIS_STATE["progress_current"] = 0
             ANALYSIS_STATE["progress_total"] = top_n + 1
 
+        if date_warning:
+            append_memory_log(date_warning, level="WARNING")
+
         append_memory_log(
-            f"啟動兩層式分析任務｜榜單：【{board_label}】｜模型：{provider.upper()} / {model_name}"
+            f"啟動兩層式分析任務｜基準開盤日：{effective_date}｜榜單：【{board_label}】｜模型：{provider.upper()} / {model_name}"
         )
-        taiex_klines = fetch_taiex_klines(days=90)
+        taiex_klines = fetch_taiex_klines(days=90, end_date=effective_date)
         if is_stop_requested():
             raise InterruptedError("使用者已請求停止分析任務。")
 
@@ -317,7 +349,7 @@ def _run_two_layer_analysis_task(
 
         with _STATE_LOCK:
             ANALYSIS_STATE["phase"] = "AUTO_SELECT"
-            ANALYSIS_STATE["phase_label"] = f"正在依【{board_label}】規則自動篩選標的並載入日 K 線..."
+            ANALYSIS_STATE["phase_label"] = f"正在依【{board_label}】({effective_date}) 規則自動篩選標的並載入日 K 線..."
 
         selection_data = select_stocks_for_analysis(
             board_key=board_key,
@@ -325,6 +357,7 @@ def _run_two_layer_analysis_task(
             kline_days=config.kline_Lookback_days,
             include_taiex=False,
             custom_codes=custom_codes,
+            target_date=effective_date,
         )
         selected_codes: List[str] = selection_data.get("selected_codes") or []
         candidates_meta: List[Dict[str, Any]] = selection_data.get("candidates") or []
@@ -372,6 +405,10 @@ def _run_two_layer_analysis_task(
         report_payload: Dict[str, Any] = {
             "report_id": report_id,
             "created_at": now_str,
+            "requested_date": requested_date,
+            "effective_date": effective_date,
+            "date_adjusted": date_info["date_adjusted"],
+            "date_warning": date_warning,
             "board_key": board_key,
             "board_label": board_label,
             "provider": provider,
@@ -443,6 +480,7 @@ class AnalyzeStartRequest(BaseModel):
         description="三大自動選股榜單代號：'core_top20' (大盤核心榜)、'under100_top20' (百元精選榜)、'popular_etf' (人氣 ETF 榜)",
     )
     top_n: int = Field(20, ge=1, le=20, description="挑選分析檔數上限 (預設 20 檔)")
+    target_date: Optional[str] = Field(None, description="指定分析基準日期 (YYYY-MM-DD)，若該日無開盤將自動選取最近開盤日")
     custom_codes: Optional[List[str]] = Field(None, description="選填：自訂額外納入分析的股票代號")
 
 
@@ -451,6 +489,7 @@ class StepLayer2StockRequest(BaseModel):
     provider: Optional[str] = Field("auto", description="'auto', 'gemini', 或 'openai'")
     model_name: Optional[str] = Field(None, description="指定模型名稱")
     stock_code: str = Field(..., description="單一待分析股票代號")
+    target_date: Optional[str] = Field(None, description="對齊後的有效開盤日期 (YYYY-MM-DD)")
     candidate_meta: Optional[Dict[str, Any]] = Field(None, description="該股榜單中繼資料")
     regime_assessment: Optional[Dict[str, Any]] = Field(None, description="第一層大盤氣候診斷結果")
 
@@ -458,6 +497,10 @@ class StepLayer2StockRequest(BaseModel):
 class StepMarkdownRequest(BaseModel):
     board_key: str = Field("core_top20")
     board_label: str = Field("大盤核心榜（成交金額 Top 20）")
+    requested_date: Optional[str] = Field(None)
+    effective_date: Optional[str] = Field(None)
+    date_adjusted: bool = Field(False)
+    date_warning: Optional[str] = Field(None)
     provider: str = Field("gemini")
     model_name: str = Field("gemini-2.5-flash")
     stopped_early: bool = Field(False)
@@ -480,11 +523,27 @@ async def serve_dashboard() -> HTMLResponse:
         return HTMLResponse(content=f.read(), status_code=200)
 
 
+@app.get("/api/trading-date/resolve")
+async def api_resolve_trading_date(
+    target_date: Optional[str] = Query(None, description="使用者選擇的日期 YYYY-MM-DD"),
+    refresh: bool = Query(False),
+) -> Dict[str, Any]:
+    """
+    檢查指定日期是否有開盤：若該日期無開盤（週末、國定假日、休市），
+    自動回傳距離該日期最近的開盤日 (effective_date) 與警告訊息 (date_warning)。
+    """
+    return resolve_nearest_trading_date(target_date=target_date, force_refresh=refresh)
+
+
 @app.get("/api/boards")
 async def api_list_boards() -> Dict[str, Any]:
-    """取得三大自動選股榜單定義與系統預設模型資訊。"""
+    """取得三大自動選股榜單定義、最新有效開盤日與系統預設模型資訊。"""
+    date_info = resolve_nearest_trading_date(None)
     return {
         "boards": list_available_boards(),
+        "latest_trading_date": date_info["effective_date"],
+        "available_min_date": date_info["available_min_date"],
+        "available_max_date": date_info["available_max_date"],
         "default_models": {
             "gemini": config.gemini_model,
             "openai": config.openai_model,
@@ -502,24 +561,38 @@ async def api_list_boards() -> Dict[str, Any]:
 async def api_preview_board(
     board_key: str,
     top_n: int = Query(20, ge=1, le=30),
+    target_date: Optional[str] = Query(None, description="指定分析基準日期 YYYY-MM-DD"),
     refresh: bool = Query(False),
 ) -> Dict[str, Any]:
-    """預覽三大自動選股榜單的候選股票清單（含最新收盤價、漲跌幅與成交金額）。"""
+    """
+    預覽三大自動選股榜單於指定日期的候選股票清單（若選擇日期未開盤，自動切換至最近開盤日並附帶警告）。
+    """
     if board_key not in AUTO_SELECT_BOARDS:
         raise HTTPException(status_code=400, detail=f"不支援的選股榜單代號: {board_key}")
     try:
         if refresh:
             clear_stock_cache()
+        date_info = resolve_nearest_trading_date(target_date=target_date, force_refresh=refresh)
+        effective_date = date_info["effective_date"]
+
         candidates = get_board_candidates_metadata(
             board_key=board_key,
             top_n=top_n,
             force_refresh=refresh,
+            target_date=effective_date,
         )
         board_info = AUTO_SELECT_BOARDS[board_key]
         return {
             "board_key": board_key,
             "board_name": board_info["name"],
             "board_description": board_info.get("description") or board_info.get("desc", ""),
+            "requested_date": date_info["requested_date"],
+            "effective_date": effective_date,
+            "is_trading_day": date_info["is_trading_day"],
+            "date_adjusted": date_info["date_adjusted"],
+            "date_warning": date_info["date_warning"],
+            "available_min_date": date_info["available_min_date"],
+            "available_max_date": date_info["available_max_date"],
             "count": len(candidates),
             "candidates": candidates,
             "updated_at": _now_tw_str(),
@@ -530,13 +603,13 @@ async def api_preview_board(
 
 
 # =====================================================================
-# Vercel Serverless 無狀態逐步執行端點 (防止 Serverless Timeout 與跨實例失憶)
+# Vercel Serverless 無狀態逐步執行端點
 # =====================================================================
 @app.post("/api/step/layer1")
 async def api_step_layer1(req: AnalyzeStartRequest) -> Dict[str, Any]:
     """
-    [Serverless 步驟 1]：驗證使用者 API Key、擷取 TAIEX K 線執行第一層大盤氣候診斷，
-    並回傳所選三大榜單的入選候選股票清單。單次請求約 2~4 秒內完成，完美相容 Vercel Serverless。
+    [Serverless 步驟 1]：校驗日期（若未開盤自動對齊最近開盤日並回傳警告）、
+    擷取截至該開盤日的 TAIEX K 線執行第一層大盤氣候診斷，並篩選出三大榜單候選股。
     """
     is_valid, err_reason = validate_api_key_format(req.api_key)
     if not is_valid:
@@ -556,7 +629,10 @@ async def api_step_layer1(req: AnalyzeStartRequest) -> Dict[str, Any]:
     }
 
     try:
-        taiex_klines = fetch_taiex_klines(days=90)
+        date_info = resolve_nearest_trading_date(req.target_date)
+        effective_date = date_info["effective_date"]
+
+        taiex_klines = fetch_taiex_klines(days=90, end_date=effective_date)
         regime_assessment = generate_market_regime(
             taiex_klines=taiex_klines,
             api_key=req.api_key.strip(),
@@ -568,10 +644,15 @@ async def api_step_layer1(req: AnalyzeStartRequest) -> Dict[str, Any]:
             board_key=board_key,
             top_n=top_n,
             force_refresh=False,
+            target_date=effective_date,
         )
         return {
             "board_key": board_key,
             "board_label": board_label,
+            "requested_date": date_info["requested_date"],
+            "effective_date": effective_date,
+            "date_adjusted": date_info["date_adjusted"],
+            "date_warning": date_info["date_warning"],
             "provider": resolved_provider,
             "model_name": resolved_model,
             "regime_assessment": regime_assessment,
@@ -589,8 +670,8 @@ async def api_step_layer1(req: AnalyzeStartRequest) -> Dict[str, Any]:
 @app.post("/api/step/layer2-stock")
 async def api_step_layer2_stock(req: StepLayer2StockRequest) -> Dict[str, Any]:
     """
-    [Serverless 步驟 2]：針對單一入選股票擷取日 K 線、計算技術指標並執行第二層五維度量化評分。
-    單次請求約 1.5~3 秒完成，支援前端即時更新排行榜與隨時按 Stop 停止。
+    [Serverless 步驟 2]：針對單一入選股票擷取截至 target_date (effective_date) 的日 K 線、
+    計算技術指標並執行第二層五維度量化評分。
     """
     is_valid, err_reason = validate_api_key_format(req.api_key)
     if not is_valid:
@@ -602,6 +683,8 @@ async def api_step_layer2_stock(req: StepLayer2StockRequest) -> Dict[str, Any]:
 
     resolved_provider = detect_provider(req.api_key, req.provider)
     resolved_model = resolve_model_name(resolved_provider, req.model_name)
+    effective_date = str(req.target_date or "").strip()[:10] or None
+
     usage_tracker = {
         "prompt_tokens": 0,
         "completion_tokens": 0,
@@ -610,12 +693,16 @@ async def api_step_layer2_stock(req: StepLayer2StockRequest) -> Dict[str, Any]:
     }
 
     try:
-        stock_klines = fetch_stock_klines(code, days=config.kline_Lookback_days)
+        stock_klines = fetch_stock_klines(
+            code,
+            days=config.kline_Lookback_days,
+            end_date=effective_date,
+        )
         if not stock_klines:
             raise HTTPException(status_code=404, detail=f"無法擷取股票 {code} 的 K 線數據")
 
         compute_all_indicators(stock_klines)
-        taiex_klines = fetch_taiex_klines(days=65)
+        taiex_klines = fetch_taiex_klines(days=65, end_date=effective_date)
 
         klines_map = {
             code: stock_klines,
@@ -671,6 +758,10 @@ async def api_step_build_markdown(req: StepMarkdownRequest) -> Dict[str, Any]:
     report_payload: Dict[str, Any] = {
         "report_id": report_id,
         "created_at": now_str,
+        "requested_date": req.requested_date or req.effective_date,
+        "effective_date": req.effective_date,
+        "date_adjusted": req.date_adjusted,
+        "date_warning": req.date_warning,
         "board_key": req.board_key,
         "board_label": req.board_label,
         "provider": req.provider,
@@ -697,7 +788,7 @@ async def api_step_build_markdown(req: StepMarkdownRequest) -> Dict[str, Any]:
 # =====================================================================
 @app.post("/api/analyze/start")
 async def api_start_analysis(req: AnalyzeStartRequest) -> Dict[str, Any]:
-    """接收使用者自備的 LLM API Key 與所選自動選股榜單，啟動兩層式背景分析任務。"""
+    """接收使用者自備的 LLM API Key、分析日期與所選自動選股榜單，啟動兩層式背景分析任務。"""
     is_valid, err_reason = validate_api_key_format(req.api_key)
     if not is_valid:
         raise HTTPException(status_code=400, detail=err_reason)
@@ -706,6 +797,7 @@ async def api_start_analysis(req: AnalyzeStartRequest) -> Dict[str, Any]:
     resolved_provider = detect_provider(req.api_key, req.provider)
     resolved_model = resolve_model_name(resolved_provider, req.model_name)
     top_n = safe_int(req.top_n, default=20, min_val=1, max_val=20)
+    date_info = resolve_nearest_trading_date(req.target_date)
 
     with _STATE_LOCK:
         if ANALYSIS_STATE["is_running"]:
@@ -718,6 +810,10 @@ async def api_start_analysis(req: AnalyzeStartRequest) -> Dict[str, Any]:
         ANALYSIS_STATE["phase_label"] = "準備啟動第一層大盤氣候診斷..."
         ANALYSIS_STATE["board_key"] = board_key
         ANALYSIS_STATE["board_label"] = board_label
+        ANALYSIS_STATE["requested_date"] = date_info["requested_date"]
+        ANALYSIS_STATE["effective_date"] = date_info["effective_date"]
+        ANALYSIS_STATE["date_adjusted"] = date_info["date_adjusted"]
+        ANALYSIS_STATE["date_warning"] = date_info["date_warning"]
         ANALYSIS_STATE["progress_current"] = 0
         ANALYSIS_STATE["progress_total"] = top_n + 1
         ANALYSIS_STATE["current_stock"] = ""
@@ -740,6 +836,7 @@ async def api_start_analysis(req: AnalyzeStartRequest) -> Dict[str, Any]:
             "model_name": resolved_model,
             "board_key": board_key,
             "top_n": top_n,
+            "target_date": req.target_date,
             "custom_codes": req.custom_codes,
         },
         daemon=True,
@@ -750,6 +847,10 @@ async def api_start_analysis(req: AnalyzeStartRequest) -> Dict[str, Any]:
         "status": "started",
         "board_key": board_key,
         "board_label": AUTO_SELECT_BOARDS[board_key]["name"],
+        "requested_date": date_info["requested_date"],
+        "effective_date": date_info["effective_date"],
+        "date_adjusted": date_info["date_adjusted"],
+        "date_warning": date_info["date_warning"],
         "provider": resolved_provider,
         "model_name": resolved_model,
         "top_n": top_n,
@@ -778,6 +879,7 @@ async def api_get_status() -> Dict[str, Any]:
             {
                 "report_id": r.get("report_id"),
                 "created_at": r.get("created_at"),
+                "effective_date": r.get("effective_date"),
                 "board_key": r.get("board_key"),
                 "board_label": r.get("board_label"),
                 "provider": r.get("provider"),
@@ -795,6 +897,10 @@ async def api_get_status() -> Dict[str, Any]:
             "phase_label": ANALYSIS_STATE["phase_label"],
             "board_key": ANALYSIS_STATE["board_key"],
             "board_label": ANALYSIS_STATE["board_label"],
+            "requested_date": ANALYSIS_STATE["requested_date"],
+            "effective_date": ANALYSIS_STATE["effective_date"],
+            "date_adjusted": ANALYSIS_STATE["date_adjusted"],
+            "date_warning": ANALYSIS_STATE["date_warning"],
             "progress_current": ANALYSIS_STATE["progress_current"],
             "progress_total": ANALYSIS_STATE["progress_total"],
             "current_stock": ANALYSIS_STATE["current_stock"],
@@ -841,8 +947,9 @@ async def api_download_markdown_report(report_id: Optional[str] = Query(None)) -
 
     md_text = target_report.get("markdown_content") or build_markdown_report(target_report)
     board_key = target_report.get("board_key", "report")
+    eff_date = (target_report.get("effective_date") or "").replace("-", "")
     rid = target_report.get("report_id", datetime.now(TW_TZ).strftime("%Y%m%d_%H%M%S"))
-    filename = f"AIAdviseStocks_{board_key}_{rid}.md"
+    filename = f"AIAdviseStocks_{board_key}_{eff_date}_{rid}.md" if eff_date else f"AIAdviseStocks_{board_key}_{rid}.md"
     encoded_filename = quote(filename)
 
     return Response(
