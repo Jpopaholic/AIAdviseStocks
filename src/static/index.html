@@ -680,13 +680,15 @@
             </select>
           </div>
           <div class="form-group">
-            <label for="modelSelect">指定推理模型 (Model)</label>
-            <select id="modelSelect">
-              <option value="gemini-2.5-flash">gemini-2.5-flash (推薦・高速低成本)</option>
-              <option value="gemini-2.5-pro">gemini-2.5-pro (深度推理)</option>
-              <option value="gpt-4o-mini">gpt-4o-mini (OpenAI 高速)</option>
-              <option value="gpt-4o">gpt-4o (OpenAI 旗艦)</option>
-            </select>
+            <label for="modelSelect">指定推理模型 (Model 手動輸入)</label>
+            <input
+              type="text"
+              id="modelSelect"
+              placeholder="手動輸入模型名稱，例如 gemini-2.5-flash、gemini-2.5-pro 或 gpt-4o"
+              value="gemini-2.5-flash"
+              autocomplete="off"
+              spellcheck="false"
+            />
           </div>
         </div>
       </section>
@@ -967,8 +969,8 @@
       document.getElementById("providerSelect").addEventListener("change", (e) => {
         localStorage.setItem(LS_PROVIDER, e.target.value);
       });
-      document.getElementById("modelSelect").addEventListener("change", (e) => {
-        localStorage.setItem(LS_MODEL, e.target.value);
+      document.getElementById("modelSelect").addEventListener("input", (e) => {
+        localStorage.setItem(LS_MODEL, e.target.value.trim());
       });
 
       selectBoard(savedBoard);
@@ -1053,12 +1055,13 @@
     function onProviderChange() {
       const prov = document.getElementById("providerSelect").value;
       const modelSel = document.getElementById("modelSelect");
-      if (prov === "openai" && modelSel.value.startsWith("gemini")) {
+      const curVal = modelSel.value.trim();
+      if (prov === "openai" && (!curVal || curVal === "gemini-2.5-flash")) {
         modelSel.value = "gpt-4o-mini";
-      } else if (prov === "gemini" && modelSel.value.startsWith("gpt")) {
+      } else if (prov === "gemini" && (!curVal || curVal === "gpt-4o-mini")) {
         modelSel.value = "gemini-2.5-flash";
       }
-      localStorage.setItem(LS_MODEL, modelSel.value);
+      localStorage.setItem(LS_MODEL, modelSel.value.trim());
     }
 
     function selectBoard(boardKey) {
@@ -1129,7 +1132,7 @@
 
       const apiKey = document.getElementById("apiKeyInput").value.trim();
       const provider = document.getElementById("providerSelect").value;
-      const modelName = document.getElementById("modelSelect").value;
+      const modelName = document.getElementById("modelSelect").value.trim();
       const topN = parseInt(document.getElementById("topNSelect").value || "20", 10);
       const requestedDate = document.getElementById("targetDateInput").value || getTodayTwDateStr();
 
@@ -1144,6 +1147,9 @@
       }
 
       localStorage.setItem(LS_API_KEY, apiKey);
+      if (modelName) {
+        localStorage.setItem(LS_MODEL, modelName);
+      }
       localStorage.setItem(LS_TARGET_DATE, requestedDate);
 
       isClientRunning = true;
