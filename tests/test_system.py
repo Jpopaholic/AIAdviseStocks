@@ -15,6 +15,7 @@ from src.services.stock_fetcher import (
     fetch_taiex_klines,
     fetch_stock_klines,
     fetch_market_turnover_snapshots,
+    resolve_nearest_trading_date,
 )
 from src.services.auto_selector import (
     list_available_boards,
@@ -158,6 +159,15 @@ def test_web_server_endpoints_and_markdown_export():
     resp_preview = client.get("/api/boards/popular_etf/preview?top_n=4")
     assert resp_preview.status_code == 200
     assert resp_preview.json()["board_key"] == "popular_etf"
+    assert "effective_date" in resp_preview.json()
+
+    # 測試非開盤日自動對齊最近開盤日與警告訊息
+    resp_date = client.get("/api/trading-date/resolve?target_date=2026-10-31")
+    assert resp_date.status_code == 200
+    date_json = resp_date.json()
+    assert date_json["date_adjusted"] is True
+    assert date_json["effective_date"] == "2026-10-30"
+    assert date_json["date_warning"] is not None
 
     # 模擬寫入一份報告並測試 Markdown (.md) 下載
     dummy_report = {
