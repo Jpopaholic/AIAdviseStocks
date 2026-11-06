@@ -39,7 +39,7 @@ class MarketRegimeAssessment(BaseModel):
     )
     reason: str = Field(
         ...,
-        description="判斷當前市場狀態的純客觀數據與宏觀技術分析依據 (繁體中文)，請分析短期均線、價格趨勢與成交量變化，嚴禁包含任何主觀買賣、停損、停利或觀望建議。"
+        description="判斷當前市場狀態的純客觀數據與宏觀技術分析依據 (繁體中文)，請分析大盤指數高低點、均線排列 (MA5/MA20/MA60) 與技術指標 (RSI/MACD/DMI) 變化，嚴禁包含任何主觀買賣、停損、停利或觀望建議，亦不可出現 'N/A' 字眼。"
     )
 
 
@@ -73,7 +73,12 @@ def generate_market_regime(
     except Exception as taiex_ind_err:
         logger.warning(f"[Regime Layer] 計算大盤技術指標失敗: {taiex_ind_err}")
 
-    recent_taiex = taiex_klines[-30:]
+    # 過濾掉收盤價無效的異常或不完整 K 線列
+    valid_taiex = [
+        k for k in taiex_klines
+        if safe_float(k.get("close") or k.get("closePrice"), 0.0) > 0
+    ]
+    recent_taiex = (valid_taiex or taiex_klines)[-30:]
     taiex_lines: List[str] = []
 
     for k in recent_taiex:
@@ -81,48 +86,46 @@ def generate_market_regime(
         h_price = safe_float(k.get("high") or k.get("highPrice"), 0.0)
         l_price = safe_float(k.get("low") or k.get("lowPrice"), 0.0)
         c_price = safe_float(k.get("close") or k.get("closePrice"), 0.0)
-        volume = safe_float(k.get("volume"), 0.0)
 
-        if volume > 0:
-            vol_str = f"{int(volume):,} 元 ({volume / 1e8:.1f} 億元)"
-        else:
-            vol_str = "N/A"
-        vol_ma5_str = f"{k['vol_ma5'] / 1e8:.1f} 億元" if (k.get("vol_ma5") and k["vol_ma5"] > 0) else "N/A"
-        vol_ma20_str = f"{k['vol_ma20'] / 1e8:.1f} 億元" if (k.get("vol_ma20") and k["vol_ma20"] > 0) else "N/A"
+        row_parts = [
+            f"日期: {k.get('date', '')}",
+            f"開盤: {o_price:.2f}",
+            f"最高: {h_price:.2f}",
+            f"最低: {l_price:.2f}",
+            f"收盤: {c_price:.2f}",
+        ]
+        if k.get("ma5") is not None:
+            row_parts.append(f"MA5: {k['ma5']:.2f}")
+        if k.get("ma20") is not None:
+            row_parts.append(f"MA20: {k['ma20']:.2f}")
+        if k.get("ma60") is not None:
+            row_parts.append(f"MA60 (季線): {k['ma60']:.2f}")
+        if k.get("rsi14") is not None:
+            row_parts.append(f"RSI: {k['rsi14']:.2f}")
+        if k.get("macd") is not None and k.get("macd_signal") is not None and k.get("macd_hist") is not None:
+            row_parts.append(
+                f"MACD: (快線:{k['macd']:.2f}, 慢線:{k['macd_signal']:.2f}, 柱狀圖:{k['macd_hist']:.2f})"
+            )
+        if k.get("adx") is not None and k.get("plus_di") is not None and k.get("minus_di") is not None:
+            row_parts.append(
+                f"DMI: (+DI:{k['plus_di']:.1f}, -DI:{k['minus_di']:.1f}, ADX:{k['adx']:.1f})"
+            )
 
-        ma5_str = f"{k['ma5']:.2f}" if k.get("ma5") is not None else "N/A"
-        ma20_str = f"{k['ma20']:.2f}" if k.get("ma20") is not None else "N/A"
-        ma60_str = f"{k['ma60']:.2f}" if k.get("ma60") is not None else "N/A"
-        rsi_str = f"{k['rsi14']:.2f}" if k.get("rsi14") is not None else "N/A"
-        macd_str = (
-            f"(快線:{k['macd']:.2f}, 慢線:{k['macd_signal']:.2f}, 柱狀圖:{k['macd_hist']:.2f})"
-            if (k.get("macd") is not None and k.get("macd_signal") is not None and k.get("macd_hist") is not None)
-            else "N/A"
-        )
-        dmi_str = (
-            f"(+DI:{k['plus_di']:.1f}, -DI:{k['minus_di']:.1f}, ADX:{k['adx']:.1f})"
-            if (k.get("adx") is not None and k.get("plus_di") is not None and k.get("minus_di") is not None)
-            else "N/A"
-        )
-
-        taiex_lines.append(
-            f"  日期: {k.get('date', '')} | 開盤: {o_price:.2f} | 最高: {h_price:.2f} | 最低: {l_price:.2f} | 收盤: {c_price:.2f} | "
-            f"大盤成交金額: {vol_str} | 5日均量: {vol_ma5_str} | 20日均量: {vol_ma20_str} | MA5: {ma5_str} | MA20: {ma20_str} | MA60 (季線): {ma60_str} | RSI: {rsi_str} | MACD: {macd_str} | DMI: {dmi_str}"
-        )
+        taiex_lines.append("  " + " | ".join(row_parts))
 
     taiex_text = "\n".join(taiex_lines)
 
     system_instruction = (
-        "你是一個資深的台股宏觀市場分析專家，擅長透過大盤指數走勢、成交量變化、均線排列與波動趨勢來判斷當前細粒度的市場狀態 (Market Regime) 與具體的姿態操作戰術。\n"
-        "你的任務是分析給定的大盤指數 K 線數據，判定目前的市場狀態 (Regime)、應採取的交易姿態 (Posture)、風險限額乘數 (Risk Multiplier)、建議目標現金比例 (Target Cash Ratio)、允許買進動作型態 (Allowed Buy Styles) 與戰術特別指令 (Tactical Directive)。\n\n"
-        "數據中已為您計算好了 MA5、MA20 (月線)、MA60 (季線)、5日均量、20日均量、RSI、MACD 與 DMI 等指標，請務必將這些指標作為您的重要評判依據！大盤成交量以每日市場總成交金額 (元 / 億元) 表示，請結合量能與 5日/20日均量之量價關係（如量增價漲、量縮價跌、量價背離等）進行宏觀剖析。\n\n"
+        "你是一個資深的台股宏觀市場分析專家，擅長透過大盤加權指數走勢、均線排列與動能波動指標來判斷當前細粒度的市場狀態 (Market Regime) 與量化風險結構參數。\n"
+        "你的任務是分析給定的大盤指數 K 線數據，判定目前的市場狀態 (Regime)、風險結構佇列 (Posture)、風險波動係數 (Risk Multiplier)、統計保守權重比 (Target Cash Ratio)、強勢技術型態分類 (Allowed Buy Styles) 與大盤結構摘要 (Tactical Directive)。\n\n"
+        "數據中已為您計算好了 MA5、MA20 (月線)、MA60 (季線)、RSI、MACD 與 DMI 等技術指標，請務必將這些價格與指標數據作為您的重要評判依據！（注意：大盤加權指數僅分析點數與技術指標，不包含成交金額；嚴禁在輸出中提及『N/A』或『無成交金額』等字眼）。\n\n"
         "【六階市場狀態 (regime) 定義】：\n"
-        "- 'STRONG_BULL': 強勢多頭。均線呈強勢多頭排列 (MA5 > MA20 > MA60)，且收盤價站穩所有均線之上，帶量攻高。\n"
+        "- 'STRONG_BULL': 強勢多頭。均線呈強勢多頭排列 (MA5 > MA20 > MA60)，且收盤價站穩所有均線之上，強勢攻高。\n"
         "- 'REBOUND_BULL': 驚驚漲/震盪偏多。價格站穩月線 MA20 上方，但上方有季線反壓或呈現拉回打底後再彈升走勢。\n"
-        "- 'CALM_RANGE': 低波動橫盤。無明顯趨勢，價格在 MA20 附近窄幅整理，成交量低迷。\n"
-        "- 'VOLATILE_RANGE': 高波動震盪。單日上下波幅劇烈，多空洗盤，方向不明。\n"
+        "- 'CALM_RANGE': 低波動橫盤。無明顯趨勢，價格在 MA20 附近窄幅整理，波動收斂。\n"
+        "- 'VOLATILE_RANGE': 高波動震盪。單日上下波幅劇烈，多空拉鋸，方向不明。\n"
         "- 'CORRECTION_BEAR': 震盪修正/初跌段。跌破月線 MA20，高點逐漸降低，但季線 MA60 仍具緩衝力道或尚未出現全面恐慌潰敗。\n"
-        "- 'PANIC_BEAR': 恐慌空頭/主跌段。均線空頭排列，收盤價跌破 MA60 季線，長黑帶量下探。\n\n"
+        "- 'PANIC_BEAR': 恐慌空頭/主跌段。均線空頭排列，收盤價跌破 MA60 季線，長黑急挫下探。\n\n"
         "【五階市場風險佇列 (posture) 與對應量化結構特徵】：\n"
         "1. STRONG_ATTACK (強勢擴張期)：\n"
         "   - 適用氣候：STRONG_BULL\n"

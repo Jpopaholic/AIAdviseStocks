@@ -65,7 +65,7 @@ def _parse_number(raw: Any, default: float = 0.0) -> float:
 
 
 def _validate_kline_row(row: Dict[str, Any]) -> bool:
-    """校驗單筆 K 線資料完整性，過濾空值或異常價格。"""
+    """校驗單筆 K 線資料完整性，過濾空值、無成交量之未結算列或異常價格。"""
     o = safe_float(row.get("open"), -1.0)
     h = safe_float(row.get("high"), -1.0)
     l = safe_float(row.get("low"), -1.0)
@@ -76,6 +76,10 @@ def _validate_kline_row(row: Dict[str, Any]) -> bool:
         return False
     if not row.get("date"):
         return False
+    # 個股（非大盤指數 TAIEX）若無成交量或成交金額，代表當日無有效交易或資料尚未結算，不納入 K 線
+    if str(row.get("stockCode", "")).upper() != "TAIEX":
+        if safe_float(row.get("volume"), 0.0) <= 0:
+            return False
     return True
 
 

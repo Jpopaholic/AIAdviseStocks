@@ -82,13 +82,12 @@ def _format_regime_context(
     if taiex_klines:
         latest_taiex = taiex_klines[-1]
         c_val = safe_float(latest_taiex.get("close"), 0.0)
-        ma20_val = latest_taiex.get("ma20")
-        ma60_val = latest_taiex.get("ma60")
-        ma20_str = f"{ma20_val:.2f}" if ma20_val is not None else "N/A"
-        ma60_str = f"{ma60_val:.2f}" if ma60_val is not None else "N/A"
-        lines.append(
-            f"● 當前大盤加權指數 (TAIEX) 收盤價: {c_val:.2f} 點 | MA20: {ma20_str} | MA60: {ma60_str}"
-        )
+        parts = [f"● 當前大盤加權指數 (TAIEX) 收盤價: {c_val:.2f} 點"]
+        if latest_taiex.get("ma20") is not None:
+            parts.append(f"MA20: {latest_taiex['ma20']:.2f}")
+        if latest_taiex.get("ma60") is not None:
+            parts.append(f"MA60: {latest_taiex['ma60']:.2f}")
+        lines.append(" | ".join(parts))
 
     if regime_assessment:
         regime = regime_assessment.get("regime", "CALM_RANGE")
@@ -217,42 +216,57 @@ def generate_analyst_assessments(
             except Exception:
                 pass
 
-        klines = klines_map.get(code, [])
+        klines = [
+            k for k in klines_map.get(code, [])
+            if safe_float(k.get("close"), 0.0) > 0 and safe_float(k.get("volume"), 0.0) > 0
+        ] or klines_map.get(code, [])
         recent_klines = klines[-15:]
         klines_lines: List[str] = []
 
         for k in recent_klines:
-            ma5_str = f"{k['ma5']:.2f}" if k.get("ma5") is not None else "N/A"
-            ma20_str = f"{k['ma20']:.2f}" if k.get("ma20") is not None else "N/A"
-            ma60_str = f"{k['ma60']:.2f}" if k.get("ma60") is not None else "N/A"
-            rsi_str = f"{k['rsi14']:.2f}" if k.get("rsi14") is not None else "N/A"
+            row_parts = [
+                f"日期: {k.get('date', '')}",
+                f"開盤: {k.get('open')}",
+                f"最高: {k.get('high')}",
+                f"最低: {k.get('low')}",
+                f"收盤: {k.get('close')}",
+            ]
+            if k.get("ma5") is not None:
+                row_parts.append(f"MA5: {k['ma5']:.2f}")
+            if k.get("ma20") is not None:
+                row_parts.append(f"MA20: {k['ma20']:.2f}")
+            if k.get("ma60") is not None:
+                row_parts.append(f"MA60 (季線): {k['ma60']:.2f}")
+            if k.get("rsi14") is not None:
+                row_parts.append(f"RSI: {k['rsi14']:.2f}")
 
             vol = safe_float(k.get("volume"), 0.0)
             vol_ma5 = k.get("vol_ma5")
             vol_ma20 = k.get("vol_ma20")
-            vol_ma5_str = f"{vol_ma5:,.0f}" if vol_ma5 is not None else "N/A"
-            vol_ma20_str = f"{vol_ma20:,.0f}" if vol_ma20 is not None else "N/A"
-            vol_ratio_str = f" (為5日均量之 {vol / vol_ma5:.1f}倍)" if (vol_ma5 and vol_ma5 > 0) else ""
+            if vol > 0:
+                vol_ratio_str = f" (為5日均量之 {vol / vol_ma5:.1f}倍)" if (vol_ma5 and vol_ma5 > 0) else ""
+                ma_vol_parts = []
+                if vol_ma5 and vol_ma5 > 0:
+                    ma_vol_parts.append(f"5日均量: {vol_ma5:,.0f}")
+                if vol_ma20 and vol_ma20 > 0:
+                    ma_vol_parts.append(f"20日均量: {vol_ma20:,.0f}")
+                ma_vol_suffix = f" ({', '.join(ma_vol_parts)})" if ma_vol_parts else ""
+                row_parts.append(f"成交量: {vol:,.0f}{vol_ratio_str}{ma_vol_suffix}")
 
-            macd_str = (
-                f"(快線:{k['macd']:.2f}, 慢線:{k['macd_signal']:.2f}, 柱狀圖:{k['macd_hist']:.2f})"
-                if (k.get("macd") is not None and k.get("macd_signal") is not None and k.get("macd_hist") is not None)
-                else "N/A"
-            )
-            dmi_str = (
-                f"(+DI:{k['plus_di']:.1f}, -DI:{k['minus_di']:.1f}, ADX:{k['adx']:.1f})"
-                if (k.get("adx") is not None and k.get("plus_di") is not None and k.get("minus_di") is not None)
-                else "N/A"
-            )
+            if k.get("macd") is not None and k.get("macd_signal") is not None and k.get("macd_hist") is not None:
+                row_parts.append(
+                    f"MACD: (快線:{k['macd']:.2f}, 慢線:{k['macd_signal']:.2f}, 柱狀圖:{k['macd_hist']:.2f})"
+                )
+            if k.get("adx") is not None and k.get("plus_di") is not None and k.get("minus_di") is not None:
+                row_parts.append(
+                    f"DMI: (+DI:{k['plus_di']:.1f}, -DI:{k['minus_di']:.1f}, ADX:{k['adx']:.1f})"
+                )
             atr_val = k.get("atr14")
             atr_pct = k.get("atr_pct")
-            atr_str = f"{atr_val:.2f} ({atr_pct:.1f}%)" if (atr_val is not None and atr_pct is not None) else "N/A"
+            if atr_val is not None and atr_pct is not None:
+                row_parts.append(f"ATR(14): {atr_val:.2f} ({atr_pct:.1f}%)")
 
-            klines_lines.append(
-                f"  日期: {k.get('date', '')} | 開盤: {k.get('open')} | 最高: {k.get('high')} | 最低: {k.get('low')} | 收盤: {k.get('close')} | "
-                f"MA5: {ma5_str} | MA20: {ma20_str} | MA60 (季線): {ma60_str} | RSI: {rsi_str} | "
-                f"成交量: {vol:,.0f}{vol_ratio_str} (5日均量: {vol_ma5_str}, 20日均量: {vol_ma20_str}) | MACD: {macd_str} | DMI: {dmi_str} | ATR(14): {atr_str}"
-            )
+            klines_lines.append("  " + " | ".join(row_parts))
 
         klines_text = "\n".join(klines_lines)
         meta_info = meta_by_code.get(code, {})
