@@ -111,6 +111,27 @@
       color: var(--accent-blue);
     }
 
+    /* Legal Disclaimer Top Banner */
+    .legal-disclaimer-banner {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      background: linear-gradient(90deg, rgba(244, 63, 94, 0.14), rgba(245, 158, 11, 0.12));
+      border: 1px solid rgba(244, 63, 94, 0.42);
+      border-left: 4px solid #f43f5e;
+      color: #fecdd3;
+      padding: 12px 16px;
+      border-radius: 10px;
+      font-size: 0.83rem;
+      line-height: 1.55;
+      margin-bottom: 18px;
+      box-shadow: var(--shadow);
+    }
+
+    .legal-disclaimer-banner strong {
+      color: #fda4af;
+    }
+
     /* Section Grid */
     .control-grid {
       display: grid;
@@ -705,6 +726,15 @@
         </button>
       </div>
     </header>
+
+    <!-- Legal & Compliance Disclaimer Banner -->
+    <div class="legal-disclaimer-banner" role="note" aria-label="免責聲明">
+      <span style="font-size: 1.15rem; line-height: 1.2;">⚖️</span>
+      <div>
+        <strong>法規遵循與免責聲明（重要）：</strong>
+        本系統僅為公開歷史日 K 線與技術指標（MA、RSI、MACD、DMI、ATR）之客觀數據整理與 AI 量化統計研究工具，非屬《證券投資信託及顧問法》規定之證券投資顧問服務。系統產出之所有分數與文字摘要均為<strong>純客觀歷史技術指標數據陳述，絕不構成任何有價證券之買賣建議、目標價位、停損停利指導或投資勸誘</strong>。使用者應自行獨立判斷並自負一切投資風險。
+      </div>
+    </div>
 
     <!-- Control Grid: BYOK Key + 3 Leaderboards & Date Picker -->
     <div class="control-grid">
