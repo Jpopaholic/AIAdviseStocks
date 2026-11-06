@@ -38,9 +38,13 @@ def _build_candidate_entry(
         (snapshot or {}).get("close") or latest_k.get("close"),
         0.0,
     )
-    prev_close = safe_float(prev_k.get("close"), close_val)
-    change_val = round(close_val - prev_close, 2) if prev_close > 0 else 0.0
-    change_pct = round((change_val / prev_close) * 100.0, 2) if prev_close > 0 else 0.0
+    if klines and len(klines) >= 2:
+        prev_close = safe_float(prev_k.get("close"), close_val)
+        change_val = round(close_val - prev_close, 2) if prev_close > 0 else 0.0
+        change_pct = round((change_val / prev_close) * 100.0, 2) if prev_close > 0 else 0.0
+    else:
+        change_val = safe_float((snapshot or {}).get("change"), 0.0)
+        change_pct = safe_float((snapshot or {}).get("change_pct"), 0.0)
 
     vol_val = safe_int(
         (snapshot or {}).get("volume") or latest_k.get("volume"),
@@ -79,6 +83,9 @@ def get_board_candidates_metadata(
     board_id: str = "core_top20",
     max_count: Optional[int] = None,
     force_refresh: bool = False,
+    *,
+    board_key: Optional[str] = None,
+    top_n: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
     """
     依據指定榜單規則篩選出入選股票中繼資料列表（不強迫拉取全部完整歷史 K 線，適合快速預覽或選股初篩）：
@@ -86,9 +93,11 @@ def get_board_candidates_metadata(
     2. under100_top20: 百元精選榜（股價 < 100 元 且 成交金額 Top 20）
     3. popular_etf: 人氣 ETF 榜（固定追蹤 0050、0056、00878、00929 等市值與高股息龍頭）
     """
-    board_cfg = get_board_config(board_id)
+    effective_board_id = board_key or board_id or "core_top20"
+    effective_max_count = top_n if top_n is not None else max_count
+    board_cfg = get_board_config(effective_board_id)
     target_id = board_cfg["id"]
-    limit = safe_int(max_count, default=board_cfg.get("top_n", 20), min_val=1, max_val=20)
+    limit = safe_int(effective_max_count, default=board_cfg.get("top_n", 20), min_val=1, max_val=30)
 
     # 模式 3：人氣 ETF 榜（固定追蹤龍頭 ETF 清單）
     if target_id == "popular_etf":
@@ -184,6 +193,12 @@ def select_stocks_for_analysis(
     max_count: Optional[int] = None,
     history_days: Optional[int] = None,
     force_refresh: bool = False,
+    *,
+    board_key: Optional[str] = None,
+    top_n: Optional[int] = None,
+    kline_days: Optional[int] = None,
+    include_taiex: bool = True,
+    custom_codes: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
     執行完整三大榜單自動選股流程：
@@ -192,23 +207,38 @@ def select_stocks_for_analysis(
     3. 呼叫 compute_all_indicators 預先計算所有技術指標 (MA5/20/60, VOL_MA5/20, RSI14, MACD, DMI, ATR14)
     4. 回傳包含榜單資訊、入選個股明細與 klines_map 的完整結構供第一層與第二層 AI 代理分析
     """
-    board_cfg = get_board_config(board_id)
-    days = safe_int(history_days, default=config.kline_history_days, min_val=30, max_val=365)
+    effective_board_id = board_key or board_id or "core_top20"
+    effective_max_count = top_n if top_n is not None else max_count
+    effective_days = kline_days if kline_days is not None else history_days
+
+    board_cfg = get_board_config(effective_board_id)
+    days = safe_int(effective_days, default=config.kline_history_days, min_val=30, max_val=365)
 
     logger.info(f"[自動選股器] 正在執行「{board_cfg['name']} ({board_cfg['id']})」自動選股...")
     raw_candidates = get_board_candidates_metadata(
         board_id=board_cfg["id"],
-        max_count=max_count,
+        max_count=effective_max_count,
         force_refresh=force_refresh,
     )
+
+    if custom_codes:
+        existing_set = {c["stock_code"] for c in raw_candidates}
+        for c_code in custom_codes:
+            c_str = str(c_code or "").strip()
+            if c_str and c_str not in existing_set:
+                raw_candidates.append(
+                    _build_candidate_entry(len(raw_candidates) + 1, c_str, board_cfg)
+                )
+                existing_set.add(c_str)
 
     klines_map: Dict[str, List[Dict[str, Any]]] = {}
 
     # 1. 載入並計算大盤 TAIEX 歷史 K 線與技術指標
-    taiex_klines = fetch_taiex_klines(days=days, force_refresh=force_refresh)
-    if taiex_klines:
-        compute_all_indicators(taiex_klines)
-        klines_map["TAIEX"] = taiex_klines
+    if include_taiex:
+        taiex_klines = fetch_taiex_klines(days=days, force_refresh=force_refresh)
+        if taiex_klines:
+            compute_all_indicators(taiex_klines)
+            klines_map["TAIEX"] = taiex_klines
 
     # 2. 載入並計算每檔入選股票之歷史 K 線與技術指標，同步更新最新收盤價與成交金額
     enriched_candidates: List[Dict[str, Any]] = []
@@ -244,9 +274,12 @@ def select_stocks_for_analysis(
 
     return {
         "board_id": board_cfg["id"],
+        "board_key": board_cfg["id"],
         "board_name": board_cfg["name"],
         "board_desc": board_cfg["desc"],
+        "board_description": board_cfg["desc"],
         "stock_codes": stock_codes,
+        "selected_codes": stock_codes,
         "candidates": enriched_candidates,
         "klines_map": klines_map,
     }

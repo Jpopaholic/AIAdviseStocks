@@ -132,6 +132,7 @@ AUTO_SELECT_BOARDS: Dict[str, Dict[str, Any]] = {
         "id": "core_top20",
         "name": "大盤核心榜",
         "desc": "成交金額 Top 20 指標股",
+        "description": "成交金額 Top 20 指標股",
         "top_n": 20,
         "max_price": None,
         "fixed_codes": None
@@ -140,6 +141,7 @@ AUTO_SELECT_BOARDS: Dict[str, Dict[str, Any]] = {
         "id": "under100_top20",
         "name": "百元精選榜",
         "desc": "股價 < 100 元 且 成交金額 Top 20",
+        "description": "股價 < 100 元 且 成交金額 Top 20",
         "top_n": 20,
         "max_price": 100.0,
         "fixed_codes": None
@@ -148,6 +150,7 @@ AUTO_SELECT_BOARDS: Dict[str, Dict[str, Any]] = {
         "id": "popular_etf",
         "name": "人氣 ETF 榜",
         "desc": "固定追蹤 0050、0056、00878、00929 等市值與高股息龍頭",
+        "description": "固定追蹤 0050、0056、00878、00929 等市值與高股息龍頭",
         "top_n": len(POPULAR_ETF_CODES),
         "max_price": None,
         "fixed_codes": list(POPULAR_ETF_CODES)

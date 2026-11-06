@@ -519,7 +519,7 @@ async def api_preview_board(
         return {
             "board_key": board_key,
             "board_name": board_info["name"],
-            "board_description": board_info["description"],
+            "board_description": board_info.get("description") or board_info.get("desc", ""),
             "count": len(candidates),
             "candidates": candidates,
             "updated_at": _now_tw_str(),

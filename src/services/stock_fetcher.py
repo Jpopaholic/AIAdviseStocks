@@ -395,67 +395,109 @@ def fetch_market_turnover_snapshots(force_refresh: bool = False) -> List[Dict[st
 
     snapshots_by_code: Dict[str, Dict[str, Any]] = {}
 
-    # 1. 嘗試自 TWSE 官方每日全市場收盤行情 API (MI_INDEX ALLBUT0999) 擷取真實成交金額
+    # 1. 優先嘗試 TWSE OpenAPI (STOCK_DAY_ALL)：單次請求即可取得最近一個有效交易日全市場收盤價、漲跌與成交金額（休市與週末亦有資料）
     try:
-        url = "https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX?type=ALLBUT0999&response=json"
-        resp = requests.get(url, headers=HEADERS, timeout=10)
-        if resp.status_code == 200:
-            data = resp.json()
-            tables = data.get("tables") or []
-            for tbl in tables:
-                fields = tbl.get("fields") or []
-                rows = tbl.get("data") or []
-                if "證券代號" in fields and "成交金額" in fields and "收盤價" in fields:
-                    idx_code = fields.index("證券代號")
-                    idx_name = fields.index("證券名稱") if "證券名稱" in fields else 1
-                    idx_vol = fields.index("成交股數") if "成交股數" in fields else 2
-                    idx_turn = fields.index("成交金額")
-                    idx_close = fields.index("收盤價")
-                    for r in rows:
-                        try:
-                            code = str(r[idx_code]).strip()
-                            # 僅保留 4 碼普通股與熱門 ETF，排除權證 (6 碼)
-                            if not (len(code) == 4 and code.isdigit()) and code not in POPULAR_ETF_CODES:
-                                continue
-                            name = str(r[idx_name]).strip()
-                            close_val = _parse_number(r[idx_close], 0.0)
-                            vol_val = int(_parse_number(r[idx_vol], 0.0))
-                            turnover_val = _parse_number(r[idx_turn], 0.0)
-                            if close_val <= 0 or turnover_val <= 0:
-                                continue
-                            register_stock_name(code, name)
-                            snapshots_by_code[code] = {
-                                "stock_code": code,
-                                "stock_name": name,
-                                "close": close_val,
-                                "volume": vol_val,
-                                "turnover": turnover_val,
-                            }
-                        except Exception:
+        openapi_url = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"
+        resp_open = requests.get(openapi_url, headers=HEADERS, timeout=5)
+        if resp_open.status_code == 200:
+            rows = resp_open.json()
+            if isinstance(rows, list):
+                for r in rows:
+                    try:
+                        code = str(r.get("Code") or "").strip()
+                        if not (len(code) == 4 and code.isdigit()) and code not in POPULAR_ETF_CODES:
                             continue
+                        name = str(r.get("Name") or "").strip()
+                        close_val = _parse_number(r.get("ClosingPrice"), 0.0)
+                        vol_val = int(_parse_number(r.get("TradeVolume"), 0.0))
+                        turnover_val = _parse_number(r.get("TradeValue"), 0.0)
+                        change_val = _parse_number(r.get("Change"), 0.0)
+                        if close_val <= 0 or turnover_val <= 0:
+                            continue
+                        prev_close = close_val - change_val
+                        change_pct = round((change_val / prev_close) * 100.0, 2) if prev_close > 0 else 0.0
+                        if name:
+                            register_stock_name(code, name)
+                        snapshots_by_code[code] = {
+                            "stock_code": code,
+                            "stock_name": name or get_stock_name(code, allow_network_lookup=False),
+                            "close": close_val,
+                            "change": round(change_val, 2),
+                            "change_pct": change_pct,
+                            "volume": vol_val,
+                            "turnover": turnover_val,
+                            "date": get_taiwan_date_str(),
+                        }
+                    except Exception:
+                        continue
     except Exception as e:
-        logger.debug(f"TWSE MI_INDEX 全市場快照擷取失敗，將嘗試 OpenAPI 或候選池計算: {e}")
+        logger.debug(f"TWSE OpenAPI STOCK_DAY_ALL 擷取失敗: {e}")
 
-    # 2. 若 MI_INDEX 無資料，嘗試從內建核心池與百元候選池的 K 線計算最新成交金額
+    # 2. 若 OpenAPI 無資料，嘗試自 TWSE MI_INDEX ALLBUT0999 擷取
+    if not snapshots_by_code:
+        try:
+            url = "https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX?type=ALLBUT0999&response=json"
+            resp = requests.get(url, headers=HEADERS, timeout=5)
+            if resp.status_code == 200:
+                data = resp.json()
+                tables = data.get("tables") or []
+                for tbl in tables:
+                    fields = tbl.get("fields") or []
+                    rows = tbl.get("data") or []
+                    if "證券代號" in fields and "成交金額" in fields and "收盤價" in fields:
+                        idx_code = fields.index("證券代號")
+                        idx_name = fields.index("證券名稱") if "證券名稱" in fields else 1
+                        idx_vol = fields.index("成交股數") if "成交股數" in fields else 2
+                        idx_turn = fields.index("成交金額")
+                        idx_close = fields.index("收盤價")
+                        for r in rows:
+                            try:
+                                code = str(r[idx_code]).strip()
+                                if not (len(code) == 4 and code.isdigit()) and code not in POPULAR_ETF_CODES:
+                                    continue
+                                name = str(r[idx_name]).strip()
+                                close_val = _parse_number(r[idx_close], 0.0)
+                                vol_val = int(_parse_number(r[idx_vol], 0.0))
+                                turnover_val = _parse_number(r[idx_turn], 0.0)
+                                if close_val <= 0 or turnover_val <= 0:
+                                    continue
+                                register_stock_name(code, name)
+                                snapshots_by_code[code] = {
+                                    "stock_code": code,
+                                    "stock_name": name,
+                                    "close": close_val,
+                                    "volume": vol_val,
+                                    "turnover": turnover_val,
+                                }
+                            except Exception:
+                                continue
+        except Exception as e:
+            logger.debug(f"TWSE MI_INDEX 全市場快照擷取失敗: {e}")
+
+    # 3. 若外部證交所全市場快照皆受限（例如海外 Serverless 節點或離線環境），快速產生備援快照以確保預覽秒回傳
     if not snapshots_by_code:
         candidate_codes = list(
             dict.fromkeys(CORE_MARKET_FALLBACK_POOL + UNDER_100_FALLBACK_POOL + POPULAR_ETF_CODES)
         )
         for code in candidate_codes:
-            klines = fetch_stock_klines(code, days=30)
+            klines = _generate_fallback_klines(code, days=5)
             if not klines:
                 continue
             latest = klines[-1]
+            prev = klines[-2] if len(klines) >= 2 else latest
             close_val = safe_float(latest.get("close"), 0.0)
+            prev_val = safe_float(prev.get("close"), close_val)
+            chg_val = round(close_val - prev_val, 2)
+            chg_pct = round((chg_val / prev_val) * 100.0, 2) if prev_val > 0 else 0.0
             vol_val = safe_int(latest.get("volume"), 0)
             turnover_val = safe_float(latest.get("turnover"), close_val * vol_val)
-            if close_val <= 0:
-                continue
             name = get_stock_name(code, allow_network_lookup=False)
             snapshots_by_code[code] = {
                 "stock_code": code,
                 "stock_name": name,
                 "close": close_val,
+                "change": chg_val,
+                "change_pct": chg_pct,
                 "volume": vol_val,
                 "turnover": turnover_val if turnover_val > 0 else close_val * vol_val,
                 "date": latest.get("date", get_taiwan_date_str()),
