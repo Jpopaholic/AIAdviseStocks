@@ -169,6 +169,7 @@ def _call_gemini_rest(
         usage_tracker["completion_tokens"] = usage_tracker.get("completion_tokens", 0) + c_tok
         usage_tracker["total_tokens"] = usage_tracker.get("total_tokens", 0) + t_tok
         usage_tracker["requests"] = usage_tracker.get("requests", 0) + 1
+        usage_tracker["calls"] = usage_tracker.get("calls", 0) + 1
 
     candidates = data.get("candidates") or []
     if not candidates:
@@ -183,6 +184,10 @@ def _call_gemini_rest(
     return _clean_json_text(result_text) if schema_cls is not None else result_text
 
 
+# 記錄不支援自訂 temperature (僅支援預設值 1) 的 OpenAI 模型快取，避免重複觸發 HTTP 400
+_OPENAI_NO_TEMP_MODELS: set = set()
+
+
 def _call_openai_rest(
     api_key: str,
     prompt: str,
@@ -195,6 +200,7 @@ def _call_openai_rest(
 ) -> str:
     """
     使用 OpenAI 官方 Chat Completions REST API 執行當次請求。
+    自動相容 o1/o3/o4/gpt-5 及任何未來不支援 temperature=0.0 的新模型。
     """
     clean_model = model_name.strip() if model_name else config.openai_model
     if clean_model.startswith("gemini"):
@@ -215,8 +221,12 @@ def _call_openai_rest(
         "model": clean_model,
         "messages": messages,
     }
-    is_reasoning = any(clean_model.lower().startswith(p) for p in ("o1", "o3", "o4"))
-    if not is_reasoning:
+    lower_model = clean_model.lower()
+    is_fixed_temp_model = (
+        lower_model in _OPENAI_NO_TEMP_MODELS
+        or any(lower_model.startswith(p) for p in ("o1", "o3", "o4", "gpt-5"))
+    )
+    if not is_fixed_temp_model:
         payload["temperature"] = temperature
     if schema_cls is not None:
         payload["response_format"] = {"type": "json_object"}
@@ -227,6 +237,14 @@ def _call_openai_rest(
     }
 
     resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
+
+    # 若新模型不支援自訂 temperature (HTTP 400 unsupported_value / unsupported_parameter)，自動移除 temperature 並重試
+    if resp.status_code == 400 and "temperature" in resp.text and "temperature" in payload:
+        logger.info(f"模型 {clean_model} 不支援 temperature={temperature}，自動切換為模型預設 temperature 重試。")
+        _OPENAI_NO_TEMP_MODELS.add(lower_model)
+        payload.pop("temperature", None)
+        resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
+
     if resp.status_code in (401, 403):
         raise LLMAuthenticationError("OpenAI API Key 無效或無權限，請確認您的金鑰是否正確。")
     if resp.status_code == 429:
@@ -244,6 +262,8 @@ def _call_openai_rest(
         usage_tracker["completion_tokens"] = usage_tracker.get("completion_tokens", 0) + c_tok
         usage_tracker["total_tokens"] = usage_tracker.get("total_tokens", 0) + t_tok
         usage_tracker["requests"] = usage_tracker.get("requests", 0) + 1
+        usage_tracker["calls"] = usage_tracker.get("calls", 0) + 1
+        usage_tracker["calls"] = usage_tracker.get("calls", 0) + 1
 
     choices = data.get("choices") or []
     if not choices:
