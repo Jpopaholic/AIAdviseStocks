@@ -345,15 +345,15 @@ def generate_analyst_assessments(
         meta = meta_by_code.get(code, {})
 
         price = safe_float(
-            latest_k.get("close") or meta.get("close"),
+            meta.get("close") or latest_k.get("close"),
             default=10.0,
             min_val=0.01,
         )
         prev_close = safe_float(prev_k.get("close"), default=price, min_val=0.01)
         change_pct = (
             safe_float(meta.get("change_pct"), default=((price - prev_close) / prev_close * 100.0))
-            if prev_close > 0
-            else 0.0
+            if ("change_pct" in meta and meta.get("change_pct") is not None)
+            else (((price - prev_close) / prev_close * 100.0) if prev_close > 0 else 0.0)
         )
         turnover = safe_float(
             meta.get("turnover") or latest_k.get("turnover"),

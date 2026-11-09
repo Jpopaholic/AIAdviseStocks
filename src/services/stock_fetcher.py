@@ -1,4 +1,5 @@
 # Path: src/services/stock_fetcher.py
+import re
 import time
 import math
 import logging
@@ -62,6 +63,29 @@ def _parse_number(raw: Any, default: float = 0.0) -> float:
     if not s:
         return default
     return safe_float(s, default)
+
+
+def _roc_date_to_iso(raw_date: Any) -> str:
+    """將證交所民國日期字串 (如 '1151106' 或 '115/11/06') 或西元日期轉為 'YYYY-MM-DD'。"""
+    s = str(raw_date or "").strip()
+    if not s:
+        return ""
+    if "/" in s:
+        parts = s.split("/")
+        if len(parts) == 3 and parts[0].isdigit():
+            yr = int(parts[0])
+            if yr < 1911:
+                yr += 1911
+            return f"{yr:04d}-{int(parts[1]):02d}-{int(parts[2]):02d}"
+    if "-" in s and len(s) >= 10:
+        return s[:10]
+    digits = re.sub(r"\D", "", s)
+    if len(digits) == 7:
+        yr = int(digits[:3]) + 1911
+        return f"{yr:04d}-{digits[3:5]}-{digits[5:7]}"
+    if len(digits) == 8:
+        return f"{digits[:4]}-{digits[4:6]}-{digits[6:8]}"
+    return ""
 
 
 def _validate_kline_row(row: Dict[str, Any]) -> bool:
@@ -566,96 +590,113 @@ def fetch_market_turnover_snapshots(
 
     snapshots_by_code: Dict[str, Dict[str, Any]] = {}
 
-    # 1. 若查詢最新交易日，優先使用 TWSE OpenAPI (STOCK_DAY_ALL) 單次請求高速取得
+    # 1. 若查詢最新交易日，優先嘗試 TWSE OpenAPI (STOCK_DAY_ALL)，但必須嚴格驗證其 Date 欄位是否等於 effective_snap_date
     if is_latest_date:
         try:
             openapi_url = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"
             resp_open = requests.get(openapi_url, headers=HEADERS, timeout=5)
             if resp_open.status_code == 200:
                 rows = resp_open.json()
-                if isinstance(rows, list):
-                    for r in rows:
-                        try:
-                            code = str(r.get("Code") or "").strip()
-                            if not (len(code) == 4 and code.isdigit()) and code not in POPULAR_ETF_CODES:
-                                continue
-                            name = str(r.get("Name") or "").strip()
-                            close_val = _parse_number(r.get("ClosingPrice"), 0.0)
-                            vol_val = int(_parse_number(r.get("TradeVolume"), 0.0))
-                            turnover_val = _parse_number(r.get("TradeValue"), 0.0)
-                            change_val = _parse_number(r.get("Change"), 0.0)
-                            if close_val <= 0 or turnover_val <= 0:
-                                continue
-                            prev_close = close_val - change_val
-                            change_pct = round((change_val / prev_close) * 100.0, 2) if prev_close > 0 else 0.0
-                            if name:
-                                register_stock_name(code, name)
-                            snapshots_by_code[code] = {
-                                "stock_code": code,
-                                "stock_name": name or get_stock_name(code, allow_network_lookup=False),
-                                "close": close_val,
-                                "change": round(change_val, 2),
-                                "change_pct": change_pct,
-                                "volume": vol_val,
-                                "turnover": turnover_val,
-                                "date": effective_snap_date,
-                            }
-                        except Exception:
-                            continue
-        except Exception as e:
-            logger.debug(f"TWSE OpenAPI STOCK_DAY_ALL 擷取失敗: {e}")
-
-    # 2. 若為歷史指定日期（或 OpenAPI 無資料），嘗試使用支援 date=YYYYMMDD 的 TWSE MI_INDEX API
-    if not snapshots_by_code:
-        try:
-            date_compact = effective_snap_date.replace("-", "")
-            url = f"https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX?date={date_compact}&type=ALLBUT0999&response=json"
-            resp = requests.get(url, headers=HEADERS, timeout=6)
-            if resp.status_code == 200:
-                data = resp.json()
-                tables = data.get("tables") or []
-                for tbl in tables:
-                    fields = tbl.get("fields") or []
-                    rows = tbl.get("data") or []
-                    if "證券代號" in fields and "成交金額" in fields and "收盤價" in fields:
-                        idx_code = fields.index("證券代號")
-                        idx_name = fields.index("證券名稱") if "證券名稱" in fields else 1
-                        idx_vol = fields.index("成交股數") if "成交股數" in fields else 2
-                        idx_turn = fields.index("成交金額")
-                        idx_close = fields.index("收盤價")
-                        idx_diff = fields.index("漲跌價差") if "漲跌價差" in fields else -1
-                        idx_sign = fields.index("漲跌(+/-)") if "漲跌(+/-)" in fields else -1
+                if isinstance(rows, list) and rows:
+                    sample_iso_date = _roc_date_to_iso(rows[0].get("Date"))
+                    if sample_iso_date and sample_iso_date != effective_snap_date:
+                        logger.info(
+                            f"TWSE OpenAPI STOCK_DAY_ALL 資料日期 ({sample_iso_date}) 尚未更新至目標開盤日 ({effective_snap_date})，自動切換使用 MI_INDEX。"
+                        )
+                    else:
                         for r in rows:
                             try:
-                                code = str(r[idx_code]).strip()
+                                row_iso_date = _roc_date_to_iso(r.get("Date"))
+                                if row_iso_date and row_iso_date != effective_snap_date:
+                                    continue
+                                code = str(r.get("Code") or "").strip()
                                 if not (len(code) == 4 and code.isdigit()) and code not in POPULAR_ETF_CODES:
                                     continue
-                                name = str(r[idx_name]).strip()
-                                close_val = _parse_number(r[idx_close], 0.0)
-                                vol_val = int(_parse_number(r[idx_vol], 0.0))
-                                turnover_val = _parse_number(r[idx_turn], 0.0)
+                                name = str(r.get("Name") or "").strip()
+                                close_val = _parse_number(r.get("ClosingPrice"), 0.0)
+                                vol_val = int(_parse_number(r.get("TradeVolume"), 0.0))
+                                turnover_val = _parse_number(r.get("TradeValue"), 0.0)
+                                change_val = _parse_number(r.get("Change"), 0.0)
                                 if close_val <= 0 or turnover_val <= 0:
                                     continue
-                                chg_val = 0.0
-                                if idx_diff >= 0:
-                                    chg_val = _parse_number(r[idx_diff], 0.0)
-                                    if idx_sign >= 0 and "-" in str(r[idx_sign]):
-                                        chg_val = -abs(chg_val)
-                                prev_c = close_val - chg_val
-                                chg_pct = round((chg_val / prev_c) * 100.0, 2) if prev_c > 0 else 0.0
-                                register_stock_name(code, name)
+                                prev_close = close_val - change_val
+                                change_pct = round((change_val / prev_close) * 100.0, 2) if prev_close > 0 else 0.0
+                                if name:
+                                    register_stock_name(code, name)
                                 snapshots_by_code[code] = {
                                     "stock_code": code,
-                                    "stock_name": name,
+                                    "stock_name": name or get_stock_name(code, allow_network_lookup=False),
                                     "close": close_val,
-                                    "change": round(chg_val, 2),
-                                    "change_pct": chg_pct,
+                                    "change": round(change_val, 2),
+                                    "change_pct": change_pct,
                                     "volume": vol_val,
                                     "turnover": turnover_val,
                                     "date": effective_snap_date,
                                 }
                             except Exception:
                                 continue
+        except Exception as e:
+            logger.debug(f"TWSE OpenAPI STOCK_DAY_ALL 擷取失敗: {e}")
+
+    # 2. 若為歷史指定日期（或 OpenAPI 尚未更新至當日），使用支援 date=YYYYMMDD 的 TWSE MI_INDEX API
+    if not snapshots_by_code:
+        try:
+            date_compact = effective_snap_date.replace("-", "")
+            url = f"https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX?date={date_compact}&type=ALLBUT0999&response=json"
+            resp = requests.get(url, headers=HEADERS, timeout=8)
+            if resp.status_code == 200:
+                data = resp.json()
+                resp_iso_date = _roc_date_to_iso(data.get("date"))
+                if data.get("stat") == "OK" and (not resp_iso_date or resp_iso_date == effective_snap_date):
+                    tables = data.get("tables") or []
+                    for tbl in tables:
+                        fields = tbl.get("fields") or []
+                        rows = tbl.get("data") or []
+                        if "證券代號" in fields and "成交金額" in fields and "收盤價" in fields:
+                            idx_code = fields.index("證券代號")
+                            idx_name = fields.index("證券名稱") if "證券名稱" in fields else 1
+                            idx_vol = fields.index("成交股數") if "成交股數" in fields else 2
+                            idx_turn = fields.index("成交金額")
+                            idx_close = fields.index("收盤價")
+                            idx_diff = fields.index("漲跌價差") if "漲跌價差" in fields else -1
+                            idx_sign = fields.index("漲跌(+/-)") if "漲跌(+/-)" in fields else -1
+                            for r in rows:
+                                try:
+                                    code = str(r[idx_code]).strip()
+                                    if not (len(code) == 4 and code.isdigit()) and code not in POPULAR_ETF_CODES:
+                                        continue
+                                    name = str(r[idx_name]).strip()
+                                    close_val = _parse_number(r[idx_close], 0.0)
+                                    vol_val = int(_parse_number(r[idx_vol], 0.0))
+                                    turnover_val = _parse_number(r[idx_turn], 0.0)
+                                    if close_val <= 0 or turnover_val <= 0:
+                                        continue
+                                    chg_val = 0.0
+                                    if idx_diff >= 0:
+                                        chg_val = abs(_parse_number(r[idx_diff], 0.0))
+                                        if idx_sign >= 0:
+                                            sign_clean = re.sub(r"<[^>]+>", "", str(r[idx_sign] or "")).strip()
+                                            if "-" in sign_clean or "跌" in sign_clean:
+                                                chg_val = -chg_val
+                                            elif "+" in sign_clean or "漲" in sign_clean:
+                                                chg_val = chg_val
+                                            else:
+                                                chg_val = 0.0
+                                    prev_c = close_val - chg_val
+                                    chg_pct = round((chg_val / prev_c) * 100.0, 2) if prev_c > 0 else 0.0
+                                    register_stock_name(code, name)
+                                    snapshots_by_code[code] = {
+                                        "stock_code": code,
+                                        "stock_name": name,
+                                        "close": close_val,
+                                        "change": round(chg_val, 2),
+                                        "change_pct": chg_pct,
+                                        "volume": vol_val,
+                                        "turnover": turnover_val,
+                                        "date": effective_snap_date,
+                                    }
+                                except Exception:
+                                    continue
         except Exception as e:
             logger.debug(f"TWSE MI_INDEX ({effective_snap_date}) 全市場快照擷取失敗: {e}")
 
